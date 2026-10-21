@@ -118,6 +118,7 @@ class PlaybackService : MediaSessionService() {
 
         callGuard = CallGuard(
             context = this,
+            scope = scope,
             onCallStarted = { onCallStarted() },
             onCallEnded = { onCallEnded() },
         ).also { it.start() }
@@ -269,7 +270,7 @@ class PlaybackService : MediaSessionService() {
     private fun rebuildOrder(startIndex: Int) {
         order.clear()
         order.add(startIndex)
-        val rest = (0 until entries.size).filter { it != startIndex }
+        val rest = (0 until entries.size).filter { it != startIndex }.toMutableList()
         if (shuffleOn) rest.shuffle(Random(System.nanoTime()))
         order.addAll(rest)
         windowStart = 0
@@ -293,7 +294,7 @@ class PlaybackService : MediaSessionService() {
         publish()
 
         scope.launch {
-            val audio = resolveEntry(entry).await()
+            val audio = resolveEntry(entry)
             if (audio == null) {
                 errorText = "'${entry.track.title}' 을(를) 찾을 수 없습니다."
                 statusText = "재생 실패"
@@ -375,7 +376,7 @@ class PlaybackService : MediaSessionService() {
                 appendPermutation()
             }
             val entry = entries.getOrNull(order.getOrNull(wantPos) ?: -1) ?: break
-            val audio = entry.audio ?: resolveEntry(entry).await() ?: break
+            val audio = entry.audio ?: resolveEntry(entry) ?: break
             p.addMediaItem(mediaItem(entry, audio))
             added++
         }
@@ -561,7 +562,7 @@ class PlaybackService : MediaSessionService() {
             scope.launch {
                 entry.job = null
                 entry.audio = null
-                val audio = resolveEntry(entry).await() ?: return@launch
+                val audio = resolveEntry(entry) ?: return@launch
                 val p = player ?: return@launch
                 val idx = p.currentMediaItemIndex
                 if (idx >= 0) {

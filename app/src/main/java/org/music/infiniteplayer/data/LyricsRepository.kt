@@ -35,11 +35,10 @@ class LyricsRepository {
 
     private fun parse(xml: String): List<LyricLine> {
         val out = ArrayList<LyricLine>(120)
-        var parser: XmlPullParser? = null
         try {
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = false
-            parser = factory.newPullParser()
+            val parser = factory.newPullParser()
             parser.setInput(StringReader(xml))
 
             var inP = false
@@ -73,11 +72,6 @@ class LyricsRepository {
             }
         } catch (_: Exception) {
             // 파싱 실패 → 빈 가사
-        } finally {
-            try {
-                parser?.close()
-            } catch (_: Exception) {
-            }
         }
         return out
     }
