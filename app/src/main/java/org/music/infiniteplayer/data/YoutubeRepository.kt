@@ -311,15 +311,17 @@ class YoutubeRepository(var quality: String = "high") {
         return if (bestScore >= 1) best else results.firstOrNull()
     }
 
-    private fun score(target: Track, cand: Track): Int {
-        val nt = Text.norm(target.title)
+    private fun score(target: Track, cand: Track): Int = score(target.title, target.artist, cand)
+
+    private fun score(targetTitle: String, targetArtist: String, cand: Track): Int {
+        val nt = Text.norm(targetTitle)
         val nc = Text.norm(cand.title)
         var s = 0
         if (nt.isNotEmpty() && nc.isNotEmpty()) {
             if (nc.contains(nt) || nt.contains(nc)) s += 4
             else if (bigrams(nt, nc) >= 2) s += 2
         }
-        val na = Text.norm(target.artist)
+        val na = Text.norm(targetArtist)
         if (na.isNotEmpty() && nc.contains(na)) s += 2
 
         val low = cand.title.lowercase()
