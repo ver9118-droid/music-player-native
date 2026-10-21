@@ -725,7 +725,7 @@ class PlaybackService : MediaSessionService() {
             if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) {
                 return "확인 불가"
             }
-            val mine = nm.activeNotifications.filter { it.notification.packageName == packageName }
+            val mine = nm.activeNotifications.filter { it.packageName == packageName }
             when (mine.size) {
                 0 -> "알림 없음"
                 1 -> "알림 1개"

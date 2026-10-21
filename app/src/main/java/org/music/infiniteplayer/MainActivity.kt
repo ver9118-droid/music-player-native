@@ -66,7 +66,10 @@ class MainActivity : ComponentActivity() {
 
     private fun connectMediaController() {
         try {
-            val token = SessionToken(this, PlaybackService::class.java)
+            val token = SessionToken(
+                this,
+                android.content.ComponentName(this, PlaybackService::class.java),
+            )
             val future = MediaController.Builder(this, token).buildAsync()
             future.addListener({
                 try {
