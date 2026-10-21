@@ -63,6 +63,12 @@ class PlaybackService : MediaSessionService() {
 
     private val entries = ArrayList<Entry>()
 
+    /** 해석해 둔 스트림 캐시 (曲目 id → 스트림) */
+    private val audioCache = HashMap<String, ResolvedAudio>()
+
+    /** 재생목록 세대 번호. 바뀌면 진행 중인 미리 준비를 중단한다. */
+    private var generation = 0
+
     /** 재생 순서 (엔트리 인덱스 목록). 무한 재생 시 계속 늘어난다. */
     private val order = ArrayList<Int>()
 
@@ -152,8 +158,11 @@ class PlaybackService : MediaSessionService() {
 
     // ── 공개 API (UI 에서 호출) ────────────────────────────────
     fun setQueue(tracks: List<Track>, startIndex: Int) {
+        // 같은 곡이면 이전에 해석해둔 스트림을 재사용한다 (재탐색 방지)
+        val previous = HashMap<String, Entry>()
+        entries.forEach { previous[it.track.id] = it }
         entries.clear()
-        tracks.forEach { entries.add(Entry(it)) }
+        tracks.forEach { t -> entries.add(previous[t.track.id] ?: Entry(t)) }
         if (entries.isEmpty()) {
             order.clear()
             publish()
@@ -269,6 +278,7 @@ class PlaybackService : MediaSessionService() {
 
     // ── 재생순서 ───────────────────────────────────────────────
     private fun rebuildOrder(startIndex: Int) {
+        generation++
         order.clear()
         order.add(startIndex)
         val rest = (0 until entries.size).filter { it != startIndex }.toMutableList()
@@ -289,6 +299,7 @@ class PlaybackService : MediaSessionService() {
     private fun jumpTo(target: Int, autoPlay: Boolean) {
         val p = player ?: return
         val entry = entries.getOrNull(order.getOrNull(target) ?: -1) ?: return
+        generation++
         pos = target
         statusText = "'${entry.track.title}' 준비 중..."
         errorText = ""
@@ -319,6 +330,12 @@ class PlaybackService : MediaSessionService() {
     }
 
     private suspend fun resolveEntry(entry: Entry): ResolvedAudio? {
+        entry.audio?.let { return it }
+        audioCache[entry.track.id]?.let {
+            entry.audio = it
+            entry.thumb = Images.thumbFile(it.thumbUrl)
+            return it
+        }
         entry.job?.let { existing ->
             return try {
                 existing.await()
@@ -333,6 +350,7 @@ class PlaybackService : MediaSessionService() {
                 if (audio != null) {
                     entry.audio = audio
                     entry.thumb = Images.cacheRemote(audio.thumbUrl)
+                    rememberAudio(entry.track.id, audio)
                 }
                 audio
             } catch (_: Exception) {
@@ -345,6 +363,12 @@ class PlaybackService : MediaSessionService() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    /** recently 해석한 스트림 캐시 (소스 전환 후 돌아와도 바로 재생) */
+    private fun rememberAudio(id: String, audio: ResolvedAudio) {
+        if (audioCache.size > 120) audioCache.clear()
+        audioCache[id] = audio
     }
 
     /** 다음 곡을 미리 준비한다. (바로 다음 곡 전환이 즉시 이뤄지도록) */
@@ -363,6 +387,7 @@ class PlaybackService : MediaSessionService() {
 
     private suspend fun fillOnce() {
         val p = player ?: return
+        val gen = generation
         // 뒤로 지나간 항목은 제거 (메모리 절약)
         val curIdx = p.currentMediaItemIndex
         if (curIdx > 0) {
@@ -371,6 +396,7 @@ class PlaybackService : MediaSessionService() {
         }
         var added = 0
         while (added < 2 && currentCoroutineContext().isActive) {
+            if (gen != generation) return   // 재생목록이 바뀌었으면 중단
             val wantPos = windowStart + p.mediaItemCount
             if (wantPos >= order.size) {
                 if (!infinite) break
@@ -378,6 +404,7 @@ class PlaybackService : MediaSessionService() {
             }
             val entry = entries.getOrNull(order.getOrNull(wantPos) ?: -1) ?: break
             val audio = entry.audio ?: resolveEntry(entry) ?: break
+            if (gen != generation) return
             p.addMediaItem(mediaItem(entry, audio))
             added++
         }
@@ -499,7 +526,8 @@ class PlaybackService : MediaSessionService() {
             val entry = entries.getOrNull(order.getOrNull(newPos) ?: -1) ?: return
 
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && repeatMode == "one") {
-                p.seekTo(0)
+                // 한 곡 반복 : 방금 끝난 곡으로 되돌아가 다시 재생
+                p.seekToPreviousMediaItem()
                 p.play()
                 return
             }
