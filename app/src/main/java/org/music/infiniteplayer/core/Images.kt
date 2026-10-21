@@ -1,0 +1,99 @@
+package org.music.infiniteplayer.core
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.LruCache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.security.MessageDigest
+
+/**
+ * 이미지 로더 (코일/피코 등 라이브러리 없이 직접 구현).
+ *
+ *  - 메모리 캐시(LruCache) + 디스크 캐시(앱 캐시 폴더)
+ *  - 차량/알림용 앨범아트는 여기서 만든 Bitmap 을 그대로 쓴다.
+ */
+object Images {
+
+    private lateinit var appContext: Context
+    private lateinit var thumbDir: File
+
+    private val memory: LruCache<String, Bitmap> by lazy {
+        val maxKb = (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt().coerceIn(4 * 1024, 32 * 1024)
+        object : LruCache<String, Bitmap>(maxKb) {
+            override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
+        }
+    }
+
+    fun init(ctx: Context) {
+        appContext = ctx.applicationContext
+        thumbDir = File(appContext.cacheDir, "thumbs")
+        try {
+            thumbDir.mkdirs()
+        } catch (_: Exception) {
+        }
+    }
+
+    fun thumbFile(url: String): File? {
+        if (url.isBlank() || !::thumbDir.isInitialized) return null
+        return File(thumbDir, hash(url) + ".jpg")
+    }
+
+    /** 네트워크에서 받아서 디스크+메모리에 캐시하고 경로를 돌려준다. */
+    suspend fun cacheRemote(url: String): File? = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext null
+        val file = thumbFile(url) ?: return@withContext null
+        if (file.exists() && file.length() > 512) return@withContext file
+        try {
+            val bytes = Net.getBytes(url, mapOf("User-Agent" to Net.UA_DESKTOP))
+            if (bytes.size < 512) return@withContext null
+            file.writeBytes(bytes)
+            file
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 메모리/디스크 캐시를 먼저 확인하고, 없으면 네트워크에서 가져온다. */
+    suspend fun load(url: String, maxPx: Int = 512): Bitmap? = withContext(Dispatchers.IO) {
+        if (url.isBlank()) return@withContext null
+        memory.get(url)?.let { return@withContext it }
+
+        val file = thumbFile(url)
+        if (file != null && file.exists() && file.length() > 512) {
+            decodeFile(file, maxPx)?.let { bmp ->
+                memory.put(url, bmp)
+                return@withContext bmp
+            }
+        }
+        val cached = cacheRemote(url) ?: return@withContext null
+        decodeFile(cached, maxPx)?.let { bmp ->
+            memory.put(url, bmp)
+            bmp
+        }
+    }
+
+    /** 앱 전용 파일(알림/차량 표시용)에서 바로 읽는다. */
+    fun decodeFile(file: File, maxPx: Int = 512): Bitmap? {
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            var sample = 1
+            var w = bounds.outWidth
+            var h = bounds.outHeight
+            while (w / sample > maxPx || h / sample > maxPx) sample *= 2
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+            BitmapFactory.decodeFile(file.absolutePath, opts)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun hash(url: String): String {
+        val md = MessageDigest.getInstance("MD5")
+        val bytes = md.digest(url.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+}

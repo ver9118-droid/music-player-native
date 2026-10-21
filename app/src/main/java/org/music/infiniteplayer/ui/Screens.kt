@@ -1,0 +1,745 @@
+package org.music.infiniteplayer.ui
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.VolumeDown
+import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import org.music.infiniteplayer.data.LyricLine
+import org.music.infiniteplayer.data.Source
+import org.music.infiniteplayer.data.Sources
+import org.music.infiniteplayer.data.Track
+import org.music.infiniteplayer.playback.PlayerState
+import kotlin.math.max
+import kotlin.math.min
+
+// ─────────────────────────────────────────────────────────────
+// 홈 화면
+// ─────────────────────────────────────────────────────────────
+
+private data class SourceItem(val group: String, val source: Source?)
+
+@Composable
+fun HomeScreen(
+    tracks: List<Track>,
+    state: PlayerState,
+    sourceKey: String,
+    loading: Boolean,
+    message: String,
+    onSelectSource: (String) -> Unit,
+    onTrackClick: (Int) -> Unit,
+    onOpenPlayer: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg),
+    ) {
+        // 헤더
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 8.dp, top = 14.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("무한 음악 플레이어", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
+                Text(
+                    text = if (loading) "차트 불러오는 중..." else "${tracks.size}곡",
+                    color = TextSecondary,
+                    fontSize = 12.5.sp,
+                )
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Rounded.Settings, "설정", tint = TextSecondary)
+            }
+        }
+
+        // 소스 선택
+        SourceChips(sourceKey = sourceKey, onSelect = onSelectSource)
+
+        if (message.isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Danger.copy(alpha = 0.14f))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                Text(message, color = Danger, fontSize = 13.sp)
+            }
+        }
+
+        // 차트 목록
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            state = rememberLazyListState(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 12.dp),
+        ) {
+            itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
+                TrackRow(
+                    track = track,
+                    rank = track.rank.takeIf { it > 0 } ?: (index + 1),
+                    playing = state.playing && state.index == index,
+                    active = state.index == index,
+                    onClick = { onTrackClick(index) },
+                )
+            }
+            if (tracks.isEmpty() && !loading) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(top = 60.dp), contentAlignment = Alignment.Center) {
+                        Text("표시할 차트가 없습니다", color = TextSecondary, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+
+        // 미니 플레이어
+        AnimatedVisibility(visible = state.title.isNotBlank()) {
+            MiniPlayer(state = state, onOpen = onOpenPlayer)
+        }
+    }
+}
+
+@Composable
+private fun SourceChips(sourceKey: String, onSelect: (String) -> Unit) {
+    val items = remember {
+        buildList {
+            var lastGroup = ""
+            Sources.all.forEach { src ->
+                if (src.group != lastGroup) {
+                    add(SourceItem(src.group, null))
+                    lastGroup = src.group
+                }
+                add(SourceItem(src.group, src))
+            }
+        }
+    }
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(items) { item ->
+            val src = item.source
+            if (src == null) {
+                Text(
+                    text = item.group,
+                    color = TextSecondary.copy(alpha = 0.75f),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 6.dp, end = 2.dp),
+                )
+            } else {
+                val selected = src.key == sourceKey
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (selected) Accent else Surface1)
+                        .clickable { onSelect(src.key) }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        text = src.label,
+                        color = if (selected) Color.White else TextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Surface1)
+            .clickable(onClick = onOpen)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Artwork(url = state.thumbUrl, size = 46.dp, corner = 10.dp)
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = state.title.ifBlank { "재생할 곡을 선택하세요" },
+                color = TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = state.status.ifBlank { state.artist },
+                color = if (state.error.isNotBlank()) Danger else TextSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        RoundIconButton(
+            icon = if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            contentDescription = if (state.playing) "일시정지" else "재생",
+            size = 40.dp,
+            iconSize = 20.dp,
+            background = Accent,
+            tint = Color.White,
+            onClick = { org.music.infiniteplayer.playback.PlayerBus.post { it.toggle() } },
+        )
+        Spacer(Modifier.width(6.dp))
+        RoundIconButton(
+            icon = Icons.Rounded.SkipNext,
+            contentDescription = "다음 곡",
+            size = 40.dp,
+            iconSize = 20.dp,
+            onClick = { org.music.infiniteplayer.playback.PlayerBus.post { it.next() } },
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 지금 재생 화면
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+fun NowPlayingScreen(
+    state: PlayerState,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onBack: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onVolume: (Float) -> Unit,
+    onShuffle: (Boolean) -> Unit,
+    onRepeat: (String) -> Unit,
+    onInfinite: (Boolean) -> Unit,
+) {
+    var showLyrics by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg)
+            .padding(horizontal = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // 상단 바
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Rounded.KeyboardArrowDown, "접기", tint = TextPrimary)
+            }
+            Text(
+                text = "지금 재생",
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                color = TextSecondary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    "즐겨찾기",
+                    tint = if (isFavorite) Accent else TextSecondary,
+                )
+            }
+            IconButton(onClick = { showLyrics = !showLyrics }) {
+                Icon(
+                    Icons.Rounded.Lyrics,
+                    "가사",
+                    tint = if (showLyrics) Accent else TextSecondary,
+                )
+            }
+        }
+
+        // 앨범아트 / 가사
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (showLyrics) {
+                LyricsPane(
+                    lines = state.lyrics,
+                    positionMs = state.positionMs,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Artwork(
+                    url = state.thumbUrl,
+                    size = 268.dp,
+                    corner = 24.dp,
+                )
+            }
+        }
+
+        // 곡 정보
+        Text(
+            text = state.title.ifBlank { "-" },
+            color = TextPrimary,
+            fontSize = 21.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = listOf(state.artist, state.album).filter { it.isNotBlank() }.joinToString(" · ")
+                .ifBlank { " " },
+            color = TextSecondary,
+            fontSize = 13.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        // 진행 바
+        SeekBar(
+            positionMs = state.positionMs,
+            durationMs = state.durationMs,
+            onSeek = onSeek,
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatTime(state.positionMs), color = TextSecondary, fontSize = 11.5.sp)
+            Text(formatTime(state.durationMs), color = TextSecondary, fontSize = 11.5.sp)
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        // 재생 컨트롤
+        EvenRow {
+            RoundIconButton(
+                icon = Icons.Rounded.Shuffle,
+                contentDescription = "셔플",
+                size = 42.dp,
+                iconSize = 19.dp,
+                background = if (state.shuffle) Accent.copy(alpha = 0.22f) else Surface2,
+                tint = if (state.shuffle) Accent else TextSecondary,
+                onClick = { onShuffle(!state.shuffle) },
+            )
+            RoundIconButton(
+                icon = Icons.Rounded.SkipPrevious,
+                contentDescription = "이전 곡",
+                size = 54.dp,
+                iconSize = 30.dp,
+                onClick = onPrev,
+            )
+            RoundIconButton(
+                icon = if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = if (state.playing) "일시정지" else "재생",
+                size = 68.dp,
+                iconSize = 36.dp,
+                background = Accent,
+                tint = Color.White,
+                onClick = onTogglePlay,
+            )
+            RoundIconButton(
+                icon = Icons.Rounded.SkipNext,
+                contentDescription = "다음 곡",
+                size = 54.dp,
+                iconSize = 30.dp,
+                onClick = onNext,
+            )
+            RoundIconButton(
+                icon = if (state.repeat == "one") Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                contentDescription = "반복",
+                size = 42.dp,
+                iconSize = 19.dp,
+                background = if (state.repeat != "off") Accent.copy(alpha = 0.22f) else Surface2,
+                tint = if (state.repeat != "off") Accent else TextSecondary,
+                onClick = {
+                    onRepeat(if (state.repeat == "all") "one" else if (state.repeat == "one") "off" else "all")
+                },
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // 볼륨
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.VolumeDown, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
+            Slider(
+                value = state.volume,
+                onValueChange = onVolume,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = Accent,
+                    activeTrackColor = Accent,
+                    inactiveTrackColor = Surface2,
+                ),
+            )
+            Icon(Icons.Rounded.VolumeUp, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
+        }
+
+        // 상태 표시
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusChip(
+                text = state.status.ifBlank { "대기" },
+                color = if (state.error.isNotBlank()) Danger else AccentSoft,
+            )
+            if (state.infinite) StatusChip("무한 재생", Accent)
+            if (state.callActive) StatusChip("통화 중", Danger)
+        }
+    }
+}
+
+@Composable
+private fun LyricsPane(
+    lines: List<LyricLine>,
+    positionMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    if (lines.isEmpty()) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("가사를 불러오는 중입니다...", color = TextSecondary, fontSize = 14.sp)
+        }
+        return
+    }
+    val idx = lines.indexOfFirst { it.startMs > positionMs }
+        .let { if (it < 0) lines.size - 1 else max(0, it - 1) }
+    val from = max(0, idx - 2)
+    val to = min(lines.size, idx + 4)
+
+    Column(
+        modifier = modifier.padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        for (i in from until to) {
+            val active = i == idx
+            Text(
+                text = lines[i].text,
+                color = if (active) TextPrimary else TextSecondary.copy(alpha = 0.38f),
+                fontSize = if (active) 21.sp else 17.sp,
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SeekBar(positionMs: Long, durationMs: Long, onSeek: (Long) -> Unit) {
+    var dragging by remember { mutableStateOf(false) }
+    var dragValue by remember { mutableStateOf(0f) }
+    val duration = durationMs.coerceAtLeast(1L).toFloat()
+    val value = if (dragging) dragValue else positionMs.toFloat().coerceIn(0f, duration)
+    Slider(
+        value = value,
+        onValueChange = {
+            dragging = true
+            dragValue = it
+        },
+        onValueChangeFinished = {
+            dragging = false
+            onSeek(dragValue.toLong())
+        },
+        valueRange = 0f..duration,
+        colors = SliderDefaults.colors(
+            thumbColor = Accent,
+            activeTrackColor = Accent,
+            inactiveTrackColor = Surface2,
+        ),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────
+// 설정 화면
+// ─────────────────────────────────────────────────────────────
+
+@Composable
+fun SettingsScreen(
+    state: PlayerState,
+    quality: String,
+    onBack: () -> Unit,
+    onVolume: (Float) -> Unit,
+    onShuffle: (Boolean) -> Unit,
+    onRepeat: (String) -> Unit,
+    onInfinite: (Boolean) -> Unit,
+    onQuality: (String) -> Unit,
+    favorites: List<Track>,
+    onRemoveFavorite: (Track) -> Unit,
+    onPlayFavorite: (Track) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg)
+            .padding(horizontal = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Rounded.ArrowBack, "뒤로", tint = TextPrimary)
+            }
+            Text("설정", color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+        }
+
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            item {
+                SectionTitle("재생")
+                SettingRow(
+                    title = "무한 재생",
+                    subtitle = "목록 끝나면 자동으로 다음 순서를 이어 붙입니다",
+                ) {
+                    Switch(
+                        checked = state.infinite,
+                        onCheckedChange = onInfinite,
+                        colors = switchColors(),
+                    )
+                }
+                SettingRow(
+                    title = "셔플",
+                    subtitle = "재생 순서를 섞습니다",
+                ) {
+                    Switch(
+                        checked = state.shuffle,
+                        onCheckedChange = onShuffle,
+                        colors = switchColors(),
+                    )
+                }
+                SettingRow(
+                    title = "반복 모드",
+                    subtitle = when (state.repeat) {
+                        "all" -> "전체 반복"
+                        "one" -> "한 곡 반복"
+                        else -> "반복 없음"
+                    },
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        RepeatChip("전체", state.repeat == "all") { onRepeat("all") }
+                        RepeatChip("한곡", state.repeat == "one") { onRepeat("one") }
+                        RepeatChip("끄기", state.repeat == "off") { onRepeat("off") }
+                    }
+                }
+            }
+
+            item {
+                SectionTitle("음향")
+                Column(Modifier.padding(horizontal = 18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.VolumeDown, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        Slider(
+                            value = state.volume,
+                            onValueChange = onVolume,
+                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                            colors = SliderDefaults.colors(
+                                thumbColor = Accent,
+                                activeTrackColor = Accent,
+                                inactiveTrackColor = Surface2,
+                            ),
+                        )
+                        Icon(Icons.Rounded.VolumeUp, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                    }
+                }
+                SettingRow(
+                    title = "음질",
+                    subtitle = when (quality) {
+                        "medium" -> "보통 (비트레이트 낮음)"
+                        "low" -> "낮음 (데이터 절약)"
+                        else -> "높음 (권장)"
+                    },
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        RepeatChip("높음", quality == "high") { onQuality("high") }
+                        RepeatChip("보통", quality == "medium") { onQuality("medium") }
+                        RepeatChip("낮음", quality == "low") { onQuality("low") }
+                    }
+                }
+            }
+
+            item {
+                SectionTitle("차량 블루투스")
+                Column(Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
+                    Text(
+                        "①安卓 설정 → 블루투스 → 차량 연결\n" +
+                                "②차량 오디오에서 '무한 음악 플레이어' 선택\n" +
+                                "③차량 스티어링휠/키패드로 재생·일시정지·곡 전환\n" +
+                                "④차량 화면에 곡명·앨범아트가 표시됩니다",
+                        color = TextSecondary,
+                        fontSize = 12.5.sp,
+                        lineHeight = 19.sp,
+                    )
+                }
+                SettingRow(
+                    title = "통화 중 자동 일시정지",
+                    subtitle = if (android.os.Build.VERSION.SDK_INT >= 31)
+                        "전화 상태 권한이 있으면 통화 시작 즉시 음악이 멈춥니다" else "오디오 포커스로 처리됩니다",
+                )
+            }
+
+            item {
+                SectionTitle("즐겨찾기 (${favorites.size})")
+            }
+            if (favorites.isEmpty()) {
+                item {
+                    Text(
+                        "즐겨찾기한 곡이 없습니다",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                    )
+                }
+            } else {
+                itemsIndexed(favorites, key = { _, t -> t.id }) { _, track ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPlayFavorite(track) }
+                            .padding(horizontal = 18.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(track.title, color = TextPrimary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(track.artist, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { onRemoveFavorite(track) }) {
+                            Icon(
+                                Icons.Rounded.Delete,
+                                "삭제",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                SectionTitle("정보")
+                Text(
+                    "무한 음악 플레이어 2.0.0\n" +
+                            "네이티브(코틀린) + ExoPlayer 기반\n" +
+                            "차트: 멜론 · 지니 · 유튜브 장르",
+                    color = TextSecondary,
+                    fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+                )
+                VSpace(30.dp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        color = Accent,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(start = 18.dp, top = 18.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun RepeatChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) Accent else Surface2)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = text,
+            color = if (selected) Color.White else TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
+private fun switchColors() = SwitchDefaults.colors(
+    checkedThumbColor = Color.White,
+    checkedTrackColor = Accent,
+    uncheckedThumbColor = TextSecondary,
+    uncheckedTrackColor = Surface2,
+    uncheckedBorderColor = Color.Transparent,
+)
+
