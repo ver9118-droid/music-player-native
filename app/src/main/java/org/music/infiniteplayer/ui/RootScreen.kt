@@ -58,12 +58,12 @@ fun RootScreen() {
     var searching by remember { mutableStateOf(false) }
     var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
 
-    val scope = rememberCoroutineScope(
+    val scope = rememberCoroutineScope {
         // UI 코루틴 예외가 앱을 죽이지 않도록
         kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
             org.music.infiniteplayer.core.CrashLog.save(error)
         }
-    )
+    }
     val repo = remember { ChartRepository(YoutubeRepository()) }
     val currentSource by rememberUpdatedState(sourceKey)
 

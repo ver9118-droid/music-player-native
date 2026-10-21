@@ -826,6 +826,9 @@ class PlaybackService : MediaSessionService() {
     private suspend fun resolveForFile(entry: Entry): ResolvedAudio? {
         val current = entry.audio
         if (current != null && current.mimeType.contains("mp4")) return current
+        // webm/opus 로 잡혀 있으면 지우고 m4a 로 다시 해석한다
+        entry.audio = null
+        entry.job = null
         return resolveEntry(entry, prefer = listOf(140, 139), useCache = false)
     }
 
@@ -843,9 +846,28 @@ class PlaybackService : MediaSessionService() {
             downloadProgress = 0
             statusText = "내려받는 중..."
             publish()
-            val res = org.music.infiniteplayer.core.Downloader.download(audio.url, dest) { percent ->
+            // 주소는 IP 로 서명되어 있어 모바일 환경에서 오래되면 403 이 된다.
+            // → 실패하면 새 주소로 받아 즉시 한 번 더 시도한다.
+            var audio = resolveForFile(entry)
+            if (audio == null) {
+                errorText = "스트림 주소를 얻지 못했습니다"
+                publish()
+                return@launch
+            }
+            var res = org.music.infiniteplayer.core.Downloader.download(audio.url, dest) { percent ->
                 downloadProgress = percent
                 publish()
+            }
+            if (!res.ok) {
+                entry.audio = null
+                entry.job = null
+                audio = resolveEntry(entry, prefer = listOf(140, 139), useCache = false)
+                if (audio != null) {
+                    res = org.music.infiniteplayer.core.Downloader.download(audio.url, dest) { percent ->
+                        downloadProgress = percent
+                        publish()
+                    }
+                }
             }
             downloadProgress = -1
             if (!res.ok) {
@@ -885,9 +907,26 @@ class PlaybackService : MediaSessionService() {
                 downloadProgress = 0
                 statusText = "음원 준비 중..."
                 publish()
-                val res = org.music.infiniteplayer.core.Downloader.download(audio.url, src) { percent ->
+                var audio2 = resolveForFile(entry)
+                if (audio2 == null) {
+                    errorText = "스트림 주소를 얻지 못했습니다"
+                    publish()
+                    return@launch
+                }
+                var res = org.music.infiniteplayer.core.Downloader.download(audio2.url, src) { percent ->
                     downloadProgress = percent
                     publish()
+                }
+                if (!res.ok) {
+                    entry.audio = null
+                    entry.job = null
+                    audio2 = resolveEntry(entry, prefer = listOf(140, 139), useCache = false)
+                    if (audio2 != null) {
+                        res = org.music.infiniteplayer.core.Downloader.download(audio2.url, src) { percent ->
+                            downloadProgress = percent
+                            publish()
+                        }
+                    }
                 }
                 downloadProgress = -1
                 if (!res.ok) {
