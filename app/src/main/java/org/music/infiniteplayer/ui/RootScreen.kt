@@ -159,7 +159,6 @@ fun RootScreen() {
                 onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
                 onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
                 onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
-                onSection = { s, e -> PlayerBus.post { it.playSection(s, e) } },
             )
 
             PAGE_SETTINGS -> SettingsScreen(

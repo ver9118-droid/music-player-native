@@ -109,10 +109,6 @@ class PlaybackService : MediaSessionService() {
     private var toastText = ""
     private var toastId = 0L
 
-    // ── 구간 반복 ───────────────────────────────────────────────
-    private var sectionStartMs = -1L
-    private var sectionEndMs = -1L
-
     private var repeatMode = "all"
     private var infinite = true
     private var shuffleOn = false
@@ -579,13 +575,6 @@ class PlaybackService : MediaSessionService() {
         ticker = scope.launch {
             var saveTick = 0
             while (isActive) {
-                // 구간 반복 재생 : 끝을 넘으면 처음으로
-                if (sectionStartMs >= 0 && sectionEndMs > sectionStartMs) {
-                    val p = player
-                    if (p != null && p.currentPosition >= sectionEndMs) {
-                        p.seekTo(sectionStartMs)
-                    }
-                }
                 publish()
                 // 재생 위치를 주기적으로 저장 (서비스 죽어도 복원되도록)
                 saveTick++
@@ -650,8 +639,6 @@ class PlaybackService : MediaSessionService() {
             lyrics = lyrics,
             callActive = callPaused,
             downloadProgress = downloadProgress,
-            sectionStartMs = sectionStartMs,
-            sectionEndMs = sectionEndMs,
             toast = toastText,
             toastId = toastId,
         )
@@ -954,26 +941,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    // ── 구간 반복 ───────────────────────────────────────────────
-    /** 지정 구간만 반복 재생 (전반부/후반부) */
-    fun playSection(startMs: Long, endMs: Long) {
-        val p = player ?: return
-        if (endMs <= startMs) return
-        sectionStartMs = startMs
-        sectionEndMs = endMs
-        p.seekTo(startMs)
-        p.play()
-        userWantsPlay = true
-        statusText = "구간 반복 ${formatTime(startMs)} ~ ${formatTime(endMs)}"
-        startTicker()
-        publish()
-    }
-
-    fun clearSection() {
-        sectionStartMs = -1L
-        sectionEndMs = -1L
-        publish()
-    }
+    // ── 구간 반복 (삭제됨) ─────────────────────────────────────
 
     /** 파일로 저장할 때 쓰는 오디오 (AAC/m4a 로 통일 → 벨소리·음악라이브러리 호환) */
     private suspend fun resolveForFile(entry: Entry): ResolvedAudio? {
@@ -1121,13 +1089,6 @@ class PlaybackService : MediaSessionService() {
             toast(if (ok) "벨소리로 설정했습니다" else "벨소리 파일은 저장했습니다. 설정 → 소리 → 벨소리에서 선택하세요")
             publish()
         }
-    }
-
-    /** mm:ss */
-    private fun formatTime(ms: Long): String {
-        if (ms <= 0) return "0:00"
-        val total = ms / 1000
-        return "%d:%02d".format(total / 60, total % 60)
     }
 
     /** 파일명 (확장자는 실제 포맷에 맞춘다) */

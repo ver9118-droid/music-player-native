@@ -476,7 +476,6 @@ fun NowPlayingScreen(
     onShuffle: (Boolean) -> Unit,
     onRepeat: (String) -> Unit,
     onInfinite: (Boolean) -> Unit,
-    onSection: (Long, Long) -> Unit,
 ) {
     // 재생 위치는 이 화면에서만 구독 (홈 화면 재렌더링 방지)
     val tick by org.music.infiniteplayer.playback.PlayerBus.tick
@@ -582,11 +581,9 @@ fun NowPlayingScreen(
             Text(formatTime(tick.durationMs), color = TextSecondary, fontSize = 11.5.sp)
         }
 
-        // 구간 · 다운로드
+        // 다운로드
         ActionChips(
             state = state,
-            onFirstHalf = { onSection(0L, tick.durationMs / 2) },
-            onSecondHalf = { onSection(tick.durationMs / 2, tick.durationMs) },
             onDownload = onDownload,
         )
 
@@ -882,12 +879,10 @@ private fun ActionButton(text: String, bg: Color, fg: Color, onClick: () -> Unit
     }
 }
 
-/** 구간 · 다운로드 칩 */
+/** 다운로드 칩 */
 @Composable
 private fun ActionChips(
     state: PlayerState,
-    onFirstHalf: () -> Unit,
-    onSecondHalf: () -> Unit,
     onDownload: () -> Unit,
 ) {
     Row(
@@ -897,8 +892,6 @@ private fun ActionChips(
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SmallChip("전반부", false, null) { onFirstHalf() }
-        SmallChip("후반부", false, null) { onSecondHalf() }
         SmallChip(
             text = if (state.downloadProgress >= 0) "내려받는 중 ${state.downloadProgress}%" else "다운로드",
             selected = false,

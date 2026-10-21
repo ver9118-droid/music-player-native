@@ -50,9 +50,6 @@ data class PlayerState(
     val lyrics: List<LyricLine> = emptyList(),
     val callActive: Boolean = false,
     val downloadProgress: Int = -1,       // 로컬 다운로드 진행률 (-1 = 없음)
-    // ── 구간 반복 ───────────────────────────────────────────────
-    val sectionStartMs: Long = -1,        // 반복 재생 구간 시작
-    val sectionEndMs: Long = -1,          // 반복 재생 구간 끝
     val toast: String = "",               // 사용자에게 보여줄 메시지
     val toastId: Long = 0L,               // 같은 메시지도 반복 표시되도록 증가
 )
