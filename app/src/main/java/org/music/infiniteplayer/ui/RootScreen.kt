@@ -58,29 +58,39 @@ fun RootScreen() {
     var searching by remember { mutableStateOf(false) }
     var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
 
-    val scope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope(
+        // UI 코루틴 예외가 앱을 죽이지 않도록
+        kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
+            org.music.infiniteplayer.core.CrashLog.save(error)
+        }
+    )
     val repo = remember { ChartRepository(YoutubeRepository()) }
     val currentSource by rememberUpdatedState(sourceKey)
 
     // 차트 로드 : 캐시를 먼저 보여줘 즉시 표시 → 그다음 최신본으로 교체
     LaunchedEffect(sourceKey) {
-        Prefs.lastSource = sourceKey
-        loading = true
-        message = ""
-        val cached = Prefs.cachedChart(sourceKey)
-        tracks = if (cached.isNotEmpty()) decodeTracks(cached) else emptyList()
         try {
-            val fresh = repo.load(Sources.byKey(sourceKey) ?: Sources.default)
-            if (currentSource == sourceKey) {
-                tracks = fresh
-                Prefs.saveChart(sourceKey, encodeTracks(fresh))
+            Prefs.lastSource = sourceKey
+            loading = true
+            message = ""
+            val cached = Prefs.cachedChart(sourceKey)
+            tracks = if (cached.isNotEmpty()) decodeTracks(cached) else emptyList()
+            try {
+                val fresh = repo.load(Sources.byKey(sourceKey) ?: Sources.default)
+                if (currentSource == sourceKey) {
+                    tracks = fresh
+                    Prefs.saveChart(sourceKey, encodeTracks(fresh))
+                }
+            } catch (e: Exception) {
+                if (currentSource == sourceKey) {
+                    message = e.message ?: "차트를 불러오지 못했습니다."
+                }
             }
+            if (currentSource == sourceKey) loading = false
         } catch (e: Exception) {
-            if (currentSource == sourceKey) {
-                message = e.message ?: "차트를 불러오지 못했습니다."
-            }
+            org.music.infiniteplayer.core.CrashLog.save(e)
+            loading = false
         }
-        if (currentSource == sourceKey) loading = false
     }
 
     BackHandler(enabled = page != PAGE_HOME) { page = PAGE_HOME }

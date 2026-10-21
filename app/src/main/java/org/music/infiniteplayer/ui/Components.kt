@@ -51,7 +51,13 @@ fun Artwork(
     corner: Dp = 14.dp,
 ) {
     val bmp by produceState<Bitmap?>(null, url) {
-        value = if (url.isBlank()) null else Images.load(url, 640)
+        value = try {
+            if (url.isBlank()) null else Images.load(url, 640)
+        } catch (e: Exception) {
+            // 이미지 로드 실패가 앱을 죽이지 않게
+            org.music.infiniteplayer.core.CrashLog.save(e)
+            null
+        }
     }
     val shape = RoundedCornerShape(corner)
     Box(
