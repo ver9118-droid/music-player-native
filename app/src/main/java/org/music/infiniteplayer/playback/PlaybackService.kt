@@ -162,7 +162,7 @@ class PlaybackService : MediaSessionService() {
         val previous = HashMap<String, Entry>()
         entries.forEach { previous[it.track.id] = it }
         entries.clear()
-        tracks.forEach { t -> entries.add(previous[t.track.id] ?: Entry(t)) }
+        tracks.forEach { t -> entries.add(previous[t.id] ?: Entry(t)) }
         if (entries.isEmpty()) {
             order.clear()
             publish()
