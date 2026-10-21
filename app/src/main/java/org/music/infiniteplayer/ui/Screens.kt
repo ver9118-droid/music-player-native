@@ -81,6 +81,8 @@ import org.music.infiniteplayer.data.LyricLine
 import org.music.infiniteplayer.data.Source
 import org.music.infiniteplayer.data.Sources
 import org.music.infiniteplayer.data.Track
+import org.music.infiniteplayer.playback.Diagnostics
+import org.music.infiniteplayer.playback.PlaybackTick
 import org.music.infiniteplayer.playback.PlayerState
 import kotlin.math.max
 import kotlin.math.min
@@ -425,6 +427,8 @@ private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit) {
 @Composable
 fun NowPlayingScreen(
     state: PlayerState,
+    tick: PlaybackTick,
+    diag: Diagnostics,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onRetry: () -> Unit,
@@ -498,7 +502,7 @@ fun NowPlayingScreen(
             if (showLyrics) {
                 LyricsPane(
                     lines = state.lyrics,
-                    positionMs = state.positionMs,
+                    positionMs = tick.positionMs,
                     modifier = Modifier.fillMaxSize(),
                 )
             } else {
@@ -535,20 +539,20 @@ fun NowPlayingScreen(
 
         // 진행 바
         SeekBar(
-            positionMs = state.positionMs,
-            durationMs = state.durationMs,
+            positionMs = tick.positionMs,
+            durationMs = tick.durationMs,
             onSeek = onSeek,
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatTime(state.positionMs), color = TextSecondary, fontSize = 11.5.sp)
-            Text(formatTime(state.durationMs), color = TextSecondary, fontSize = 11.5.sp)
+            Text(formatTime(tick.positionMs), color = TextSecondary, fontSize = 11.5.sp)
+            Text(formatTime(tick.durationMs), color = TextSecondary, fontSize = 11.5.sp)
         }
 
         // 구간/벨소리/다운로드
         ActionChips(
             state = state,
-            onFirstHalf = { onSection(0L, state.durationMs / 2) },
-            onSecondHalf = { onSection(state.durationMs / 2, state.durationMs) },
+            onFirstHalf = { onSection(0L, tick.durationMs / 2) },
+            onSecondHalf = { onSection(tick.durationMs / 2, tick.durationMs) },
             onMarkStart = onMarkStart,
             onMarkEnd = onMarkEnd,
             onPlayHighlight = {
@@ -639,11 +643,11 @@ fun NowPlayingScreen(
             )
             if (state.infinite) StatusChip("무한 재생", Accent)
             if (state.callActive) StatusChip("통화 중", Danger)
-            if (state.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
+            if (diag.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
         }
 
         // 시스템 볼륨이 0 이면 소리가 안 난다 (가장 흔한 원인)
-        if (state.systemVolume.startsWith("0 ")) {
+        if (diag.systemVolume.startsWith("0 ")) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -721,20 +725,21 @@ fun NowPlayingScreen(
 @Composable
 fun DiagnosticsScreen(
     state: PlayerState,
+    diag: Diagnostics,
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onDownload: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
-    val report = remember(state) {
+    val report = remember(state, diag) {
         buildString {
             appendLine("무한 음악 플레이어 진단")
             appendLine("곡: ${state.title} / ${state.artist}")
-            appendLine("상태: ${state.status} (player=${state.playerState}, playing=${state.playing}, buffering=${state.buffering})")
-            appendLine("스트림: ${state.streamInfo}")
-            appendLine("주소 응답: ${state.streamProbe}")
-            appendLine("시스템 볼륨: ${state.systemVolume}")
-            appendLine("출력 경로: ${state.audioRoute}")
+            appendLine("상태: ${state.status} (player=${diag.playerState}, playing=${state.playing}, buffering=${state.buffering})")
+            appendLine("스트림: ${diag.streamInfo}")
+            appendLine("주소 응답: ${diag.streamProbe}")
+            appendLine("시스템 볼륨: ${diag.systemVolume}")
+            appendLine("출력 경로: ${diag.audioRoute}")
             appendLine("앱 볼륨: ${state.volume}")
             appendLine("오류: ${state.error.ifBlank { "없음" }}")
         }
@@ -759,13 +764,13 @@ fun DiagnosticsScreen(
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             item {
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
-                    DiagRow("재생 상태", "${state.status}  (${state.playerState})")
+                    DiagRow("재생 상태", "${state.status}  (${diag.playerState})")
                     DiagRow("재생 중", if (state.playing) "예" else "아니오")
                     DiagRow("버퍼링", if (state.buffering) "예" else "아니오")
-                    DiagRow("스트림", state.streamInfo.ifBlank { "-" })
-                    DiagRow("주소 응답", state.streamProbe.ifBlank { "-" })
-                    DiagRow("시스템 볼륨", state.systemVolume.ifBlank { "-" })
-                    DiagRow("출력 경로", state.audioRoute.ifBlank { "-" })
+                    DiagRow("스트림", diag.streamInfo.ifBlank { "-" })
+                    DiagRow("주소 응답", diag.streamProbe.ifBlank { "-" })
+                    DiagRow("시스템 볼륨", diag.systemVolume.ifBlank { "-" })
+                    DiagRow("출력 경로", diag.audioRoute.ifBlank { "-" })
                     DiagRow("앱 볼륨", "%.0f%%".format(state.volume * 100))
                     DiagRow("오류", state.error.ifBlank { "없음" })
                     if (state.downloadProgress >= 0) {

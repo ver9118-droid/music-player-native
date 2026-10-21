@@ -97,6 +97,7 @@ class PlaybackService : MediaSessionService() {
     private var retryCount = 0
     private var downloadProgress = -1
     private var preparing = false
+    private var lastState = PlayerState()
 
     // ── 하이라이트 / 구간 반복 ────────────────────────────────
     private var highlightStartMs = -1L
@@ -152,6 +153,7 @@ class PlaybackService : MediaSessionService() {
         ).also { it.start() }
 
         PlayerBus.attach(this)
+        startDiagnosticsLoop()
         publish()
     }
 
@@ -520,43 +522,76 @@ class PlaybackService : MediaSessionService() {
         ticker = null
     }
 
+    /**
+     * 상태 publish.
+     *
+     * 주의 : AudioManager 호출(Binder)을 절대 넣지 않는다.
+     *   여기서 getDevices() 등을 호출하면 250ms마다 메인 스레드가 막혀
+     *   화면이 얼어붙는다. 진단 정보는 refreshDiagnostics() 로 필요할 때만 갱신.
+     */
     private fun publish() {
         val p = player
         val entry = currentEntry
         val track = entry?.track
         refreshStatus()
-        PlayerBus.publish(
-            PlayerState(
-                playing = p?.isPlaying == true,
-                buffering = p?.playbackState == Player.STATE_BUFFERING,
+        val next = PlayerState(
+            playing = p?.isPlaying == true,
+            buffering = p?.playbackState == Player.STATE_BUFFERING,
+            index = order.getOrNull(pos) ?: -1,
+            count = entries.size,
+            title = track?.title ?: "",
+            artist = track?.artist ?: "",
+            album = track?.album ?: "",
+            thumbUrl = track?.thumbUrl ?: "",
+            shuffle = shuffleOn,
+            repeat = repeatMode,
+            infinite = infinite,
+            volume = volume,
+            status = statusText,
+            error = errorText,
+            lyrics = lyrics,
+            callActive = callPaused,
+            downloadProgress = downloadProgress,
+            highlightStartMs = highlightStartMs,
+            highlightEndMs = highlightEndMs,
+            sectionStartMs = sectionStartMs,
+            sectionEndMs = sectionEndMs,
+        )
+        // 실제로 바뀔 때만 알린다 (홈 화면 불필요한 재생성 방지)
+        if (next != lastState) {
+            lastState = next
+            PlayerBus.publish(next)
+        }
+        PlayerBus.publishTick(
+            PlaybackTick(
                 positionMs = p?.currentPosition ?: 0L,
                 durationMs = p?.duration ?: 0L,
-                index = order.getOrNull(pos) ?: -1,
-                count = entries.size,
-                title = track?.title ?: "",
-                artist = track?.artist ?: "",
-                album = track?.album ?: "",
-                thumbUrl = track?.thumbUrl ?: "",
-                shuffle = shuffleOn,
-                repeat = repeatMode,
-                infinite = infinite,
-                volume = volume,
-                status = statusText,
-                error = errorText,
-                lyrics = lyrics,
-                callActive = callPaused,
+            )
+        )
+    }
+
+    /** 진단 정보 갱신 (진단 화면을 열 때만 호출) */
+    fun refreshDiagnostics() {
+        val p = player
+        PlayerBus.publishDiagnostics(
+            Diagnostics(
                 playerState = playerStateName(p?.playbackState),
                 streamInfo = streamInfo,
                 streamProbe = streamProbe,
                 systemVolume = systemVolumeText(),
                 audioRoute = audioRouteText(),
-                downloadProgress = downloadProgress,
-                highlightStartMs = highlightStartMs,
-                highlightEndMs = highlightEndMs,
-                sectionStartMs = sectionStartMs,
-                sectionEndMs = sectionEndMs,
             )
         )
+    }
+
+    /** 진단 정보 주기적 갱신 (AudioManager 호출은 IO 스레드에서) */
+    private fun startDiagnosticsLoop() {
+        scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                refreshDiagnostics()
+                delay(10_000)
+            }
+        }
     }
 
     /** ExoPlayer 의 실제 상태를 그대로 보여준다 (버퍼링/오류를 '재생 중'으로 덮지 않는다) */
@@ -847,10 +882,13 @@ class PlaybackService : MediaSessionService() {
                 val clipped = File(cacheDir, "ring_${entry.track.id.hashCode()}.m4a")
                 statusText = "구간 자르는 중..."
                 publish()
-                if (!org.music.infiniteplayer.core.ClipMaker.trim(
+                // 무거운 작업은 반드시 IO 스레드에서 (메인 스레드 차단 방지)
+                val trimmed = withContext(Dispatchers.IO) {
+                    org.music.infiniteplayer.core.ClipMaker.trim(
                         src, highlightStartMs, highlightEndMs, clipped
                     )
-                ) {
+                }
+                if (!trimmed) {
                     errorText = "구간 자르기에 실패했습니다"
                     publish()
                     return@launch
@@ -865,7 +903,9 @@ class PlaybackService : MediaSessionService() {
                 publish()
                 return@launch
             }
-            val ok = org.music.infiniteplayer.core.RingtoneSetter.setRingtone(this@PlaybackService, uri)
+            val ok = withContext(Dispatchers.IO) {
+                org.music.infiniteplayer.core.RingtoneSetter.setRingtone(this@PlaybackService, uri)
+            }
             errorText = ""
             statusText = if (ok) "벨소리로 설정했습니다" else "벨소리로 저장했습니다 (설정에서 선택)"
             publish()

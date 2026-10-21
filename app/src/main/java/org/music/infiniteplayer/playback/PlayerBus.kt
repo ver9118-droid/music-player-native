@@ -4,12 +4,34 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.music.infiniteplayer.data.LyricLine
 
-/** UI 가 보는 재생 상태. */
+/**
+ * 자주 바뀌는 재생 정보 (위치/길이).
+ *
+ * 위치는 250ms 마다 갱신되므로, 곡 정보와 분리해 두어야
+ * 홈 화면 목록이 매 프레임 다시 그려지지 않는다. (성능/끝김 방지)
+ */
+data class PlaybackTick(
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+)
+
+/**
+ * 진단 정보.
+ *
+ * AudioManager 를 호출해야 하므로(昂贵) 필요할 때만 갱신한다.
+ */
+data class Diagnostics(
+    val playerState: String = "IDLE",
+    val streamInfo: String = "",
+    val streamProbe: String = "",
+    val systemVolume: String = "",
+    val audioRoute: String = "",
+)
+
+/** UI 가 보는 재생 상태 (曲目 정보/설정 등 자주 안 바뀌는 것들). */
 data class PlayerState(
     val playing: Boolean = false,
     val buffering: Boolean = false,
-    val positionMs: Long = 0L,
-    val durationMs: Long = 0L,
     val index: Int = -1,
     val count: Int = 0,
     val title: String = "",
@@ -24,12 +46,6 @@ data class PlayerState(
     val error: String = "",
     val lyrics: List<LyricLine> = emptyList(),
     val callActive: Boolean = false,
-    // ── 진단 정보 ───────────────────────────────────────────
-    val playerState: String = "IDLE",     // ExoPlayer 실제 상태
-    val streamInfo: String = "",          // itag / mime
-    val streamProbe: String = "",         // 스트림 URL HTTP 응답 (예: HTTP 206)
-    val systemVolume: String = "",        // 시스템 미디어 볼륨 (예: 7/15)
-    val audioRoute: String = "",          // 출력 경로 (스피커/이어폰/블루투스…)
     val downloadProgress: Int = -1,       // 로컬 다운로드 진행률 (-1 = 없음)
     // ── 구간/하이라이트 ───────────────────────────────────────
     val highlightStartMs: Long = -1,      // 하이라이트 시작점 (A)
@@ -49,6 +65,12 @@ object PlayerBus {
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state
 
+    private val _tick = MutableStateFlow(PlaybackTick())
+    val tick: StateFlow<PlaybackTick> = _tick
+
+    private val _diagnostics = MutableStateFlow(Diagnostics())
+    val diagnostics: StateFlow<Diagnostics> = _diagnostics
+
     @Volatile
     private var service: PlaybackService? = null
 
@@ -64,6 +86,8 @@ object PlayerBus {
         if (service === svc) service = null
     }
 
+    fun isAttached(): Boolean = service != null
+
     /** 서비스에 명령을 전달한다. (서비스가 아직 없으면 준비되면 실행) */
     fun post(block: (PlaybackService) -> Unit) {
         val svc = service
@@ -72,5 +96,13 @@ object PlayerBus {
 
     internal fun publish(next: PlayerState) {
         _state.value = next
+    }
+
+    internal fun publishTick(next: PlaybackTick) {
+        _tick.value = next
+    }
+
+    internal fun publishDiagnostics(next: Diagnostics) {
+        _diagnostics.value = next
     }
 }

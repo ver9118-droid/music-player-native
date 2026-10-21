@@ -16,6 +16,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import org.music.infiniteplayer.core.Prefs
@@ -36,6 +37,8 @@ private const val PAGE_DIAG = 3
 @Composable
 fun RootScreen() {
     val state by PlayerBus.state.collectAsStateWithLifecycle()
+    val tick by PlayerBus.tick.collectAsStateWithLifecycle()
+    val diag by PlayerBus.diagnostics.collectAsStateWithLifecycle()
 
     var page by rememberSaveable { mutableIntStateOf(PAGE_HOME) }
     var sourceKey by rememberSaveable {
@@ -80,6 +83,23 @@ fun RootScreen() {
 
     BackHandler(enabled = page != PAGE_HOME) { page = PAGE_HOME }
 
+    // 안전망 : 서비스가 죽었는데 UI 가 살아 있으면 다시 살린다
+    val appContext = LocalContext.current
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(3000)
+            if (!PlayerBus.isAttached()) {
+                try {
+                    appContext.startService(
+                        android.content.Intent(appContext, org.music.infiniteplayer.playback.PlaybackService::class.java)
+                    )
+                } catch (_: Exception) {
+                    // 백그라운드에서는 제한될 수 있음 (무시)
+                }
+            }
+        }
+    }
+
     // 상태바/네비게이션바 영역과 겹치지 않도록 inset 적용
     Box(
         modifier = Modifier
@@ -90,6 +110,8 @@ fun RootScreen() {
         when (page) {
             PAGE_PLAYER -> NowPlayingScreen(
                 state = state,
+                tick = tick,
+                diag = diag,
                 isFavorite = favorites.any { it.id == currentTrackId(state, tracks) },
                 onToggleFavorite = {
                     val id = currentTrackId(state, tracks)
@@ -143,6 +165,7 @@ fun RootScreen() {
 
             PAGE_DIAG -> DiagnosticsScreen(
                 state = state,
+                diag = diag,
                 onBack = { page = PAGE_SETTINGS },
                 onRetry = { PlayerBus.post { it.retryCurrent() } },
                 onDownload = { PlayerBus.post { it.downloadAndPlay() } },
