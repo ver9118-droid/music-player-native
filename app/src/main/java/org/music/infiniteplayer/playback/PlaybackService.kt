@@ -836,12 +836,6 @@ class PlaybackService : MediaSessionService() {
     fun downloadToDevice() {
         val entry = currentEntry ?: return
         scope.launch {
-            val audio = resolveForFile(entry)
-            if (audio == null) {
-                errorText = "스트림을 얻지 못했습니다"
-                publish()
-                return@launch
-            }
             val dest = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
             downloadProgress = 0
             statusText = "내려받는 중..."
@@ -870,15 +864,16 @@ class PlaybackService : MediaSessionService() {
                 }
             }
             downloadProgress = -1
-            if (!res.ok) {
+            val useAudio = audio
+            if (!res.ok || useAudio == null) {
                 errorText = "다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
                 statusText = "다운로드 실패"
                 publish()
                 return@launch
             }
-            val name = safeFileName(entry.track, audio.mimeType)
+            val name = safeFileName(entry.track, useAudio.mimeType)
             val saved = org.music.infiniteplayer.core.MediaSaver.saveToMusic(
-                this@PlaybackService, dest, name, audio.mimeType,
+                this@PlaybackService, dest, name, useAudio.mimeType,
             )
             if (saved.uri == null) {
                 errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
@@ -903,6 +898,7 @@ class PlaybackService : MediaSessionService() {
                 return@launch
             }
             val src = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
+            var useAudio = audio
             if (!src.exists() || src.length() < 1024) {
                 downloadProgress = 0
                 statusText = "음원 준비 중..."
@@ -929,15 +925,16 @@ class PlaybackService : MediaSessionService() {
                     }
                 }
                 downloadProgress = -1
-                if (!res.ok) {
+                if (!res.ok || audio2 == null) {
                     errorText = "다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
                     statusText = "다운로드 실패"
                     publish()
                     return@launch
                 }
+                useAudio = audio2
             }
             var file = src
-            val name = safeFileName(entry.track, audio.mimeType)
+            val name = safeFileName(entry.track, useAudio.mimeType)
             if (highlightStartMs >= 0 && highlightEndMs > highlightStartMs) {
                 val clipped = File(cacheDir, "ring_${entry.track.id.hashCode()}.m4a")
                 statusText = "구간 자르는 중..."
