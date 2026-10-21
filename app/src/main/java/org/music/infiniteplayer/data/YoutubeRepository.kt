@@ -33,13 +33,13 @@ class YoutubeRepository(var quality: String = "high") {
 
     suspend fun search(query: String, limit: Int = 20): List<Track> = withContext(Dispatchers.IO) {
         val body = JSONObject().apply {
-            put("context", clientContext(CLIENTS.first()))
+            put("context", clientContext(SEARCH_CLIENT))
             put("query", query)
             put("params", "EgWKAQIIAWoKEAkQBRAK")
             put("contentCheckOk", true)
             put("racyCheckOk", true)
         }
-        val json = Net.postJson("$API/search", body.toString(), ytHeaders())
+        val json = Net.postJson("$API/search", body.toString(), searchHeaders())
         parseSearch(json, limit)
     }
 
@@ -92,9 +92,12 @@ class YoutubeRepository(var quality: String = "high") {
         duration: Long,
         preferItags: List<Int>? = null,
     ): ResolvedAudio? {
+        // 봇 판정 회피용 방문자 ID (없으면 일부 클라이언트가 LOGIN_REQUIRED 를 준다)
+        val visitor = VisitorData.get()
         for (client in CLIENTS) {
             try {
                 val ctx = clientContext(client)
+                if (visitor.isNotEmpty()) ctx.optJSONObject("client")?.put("visitorData", visitor)
                 if (client.embed) {
                     ctx.put("thirdParty", JSONObject().put("embedUrl", "https://www.youtube.com/"))
                 }
@@ -104,7 +107,11 @@ class YoutubeRepository(var quality: String = "high") {
                     put("contentCheckOk", true)
                     put("racyCheckOk", true)
                 }
-                val json = Net.postJson("$API/player", body.toString(), ytHeaders(client.ua))
+                val json = Net.postJson(
+                    "$API/player?prettyPrint=false",
+                    body.toString(),
+                    ytHeaders(client, visitor),
+                )
                 val obj = JSONObject(json)
                 val status = obj.optJSONObject("playabilityStatus")?.optString("status").orEmpty()
                 if (status != "OK") continue
@@ -321,15 +328,29 @@ class YoutubeRepository(var quality: String = "high") {
         return JSONObject().put("client", c)
     }
 
-    private fun ytHeaders(ua: String = Net.UA_YT): Map<String, String> = mapOf(
-        "User-Agent" to ua,
+    /** 검색용 헤더 (기존과 동일하게 동작) */
+    private fun searchHeaders(): Map<String, String> = mapOf(
+        "User-Agent" to Net.UA_YT,
         "X-Goog-Api-Format-Version" to "2",
         "Accept" to "*/*",
     )
 
+    private fun ytHeaders(client: ClientSpec, visitor: String = ""): Map<String, String> {
+        val h = LinkedHashMap<String, String>()
+        h["User-Agent"] = client.ua
+        h["X-Goog-Api-Format-Version"] = "2"
+        h["X-YouTube-Client-Name"] = client.id.toString()
+        h["X-YouTube-Client-Version"] = client.version
+        h["Origin"] = "https://www.youtube.com"
+        h["Accept"] = "*/*"
+        if (visitor.isNotEmpty()) h["X-Goog-Visitor-Id"] = visitor
+        return h
+    }
+
     private data class ClientSpec(
         val name: String,
         val version: String,
+        val id: Int,
         val extra: Map<String, Any> = emptyMap(),
         val ua: String = Net.UA_YT,
         val embed: Boolean = false,
@@ -338,12 +359,34 @@ class YoutubeRepository(var quality: String = "high") {
     private companion object {
         const val API = "https://www.youtube.com/youtubei/v1"
 
+        /** 검색은 ANDROID 클라이언트 응답형식( videoRenderer )을 쓴다 */
+        val SEARCH_CLIENT = ClientSpec("ANDROID", "20.10.38", 3, mapOf("androidSdkVersion" to 30))
+
+        /** visionOS 클라이언트용 User-Agent (전체 range 를 받을 수 있는 URL 을 받는다) */
+        const val VISION_UA =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 " +
+                    "(KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+
         val CLIENTS = listOf(
-            ClientSpec("ANDROID", "20.10.38", mapOf("androidSdkVersion" to 30)),
-            ClientSpec("ANDROID_VR", "1.65.10", mapOf("androidSdkVersion" to 32)),
-            ClientSpec("IOS", "20.10.4", mapOf("deviceMake" to "Apple", "deviceModel" to "iPhone16,2")),
-            ClientSpec("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "2.0", embed = true),
-            ClientSpec("WEB", "2.20250101.00.00"),
+            // visionOS 클라이언트 : visitorData 를 같이 보내면
+            // 전체 바이트 범위를 정상적으로 받을 수 있는 URL 이 나온다.
+            // (다른 클라이언트는 1MB 창으로 제한되어 재생이 안 됨)
+            ClientSpec(
+                "VISIONOS", "1.02", 101,
+                mapOf(
+                    "deviceMake" to "Apple",
+                    "deviceModel" to "RealityDevice17,1",
+                    "userAgent" to VISION_UA,
+                    "osName" to "visionOS",
+                    "osVersion" to "26.5.23O471",
+                ),
+                ua = VISION_UA,
+            ),
+            ClientSpec("ANDROID", "20.10.38", 3, mapOf("androidSdkVersion" to 30)),
+            ClientSpec("ANDROID_VR", "1.65.10", 28, mapOf("androidSdkVersion" to 32)),
+            ClientSpec("IOS", "20.10.4", 5, mapOf("deviceMake" to "Apple", "deviceModel" to "iPhone16,2")),
+            ClientSpec("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "2.0", 85, embed = true),
+            ClientSpec("WEB", "2.20250101.00.00", 1),
         )
 
         val QUALITY_ITAGS = mapOf(

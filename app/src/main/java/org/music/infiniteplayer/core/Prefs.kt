@@ -62,6 +62,11 @@ object Prefs {
         get() = sp.getString(KEY_SOURCE, "") ?: ""
         set(v) = sp.edit().putString(KEY_SOURCE, v).apply()
 
+    /** 유튜브 방문자 ID (봇 판정 회피용) */
+    var visitorData: String
+        get() = sp.getString("visitor_data", "") ?: ""
+        set(v) = sp.edit().putString("visitor_data", v).apply()
+
     // ── 차트 캐시 (재실행 시 즉시 표시) ─────────────────────────
     fun cachedChart(sourceKey: String): String =
         sp.getString(KEY_CHART_PREFIX + sourceKey, "") ?: ""
