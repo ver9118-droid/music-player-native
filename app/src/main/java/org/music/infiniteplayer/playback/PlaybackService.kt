@@ -133,6 +133,8 @@ class PlaybackService : MediaSessionService() {
         PlayerBus.attach(this)
         startDiagnosticsLoop()
         publish()
+        // 서비스가 재시작된 경우 마지막 곡/위치를 복원한다
+        restorePlaybackState()
     }
 
     private fun initPlayer() {
@@ -211,8 +213,61 @@ class PlaybackService : MediaSessionService() {
             publish()
             return
         }
+        // 서비스가 죽어도 복원되도록 목록을 저장한다
+        savePlaybackState(tracks, startIndex)
         rebuildOrder(startIndex.coerceIn(0, entries.size - 1))
         jumpTo(0, autoPlay = true)
+    }
+
+    /** 재생목록/현재곡을 저장 (서비스 재시작 시 복원용) */
+    private fun savePlaybackState(tracks: List<Track>, index: Int) {
+        try {
+            Prefs.playbackQueue = org.music.infiniteplayer.data.encodeTracks(tracks)
+            Prefs.playbackIndex = index
+        } catch (_: Exception) {
+        }
+    }
+
+    /** 서비스가 다시 살아났을 때 마지막 곡/위치 복원 */
+    private fun restorePlaybackState() {
+        val json = Prefs.playbackQueue
+        if (json.isBlank()) return
+        val list = try {
+            org.music.infiniteplayer.data.decodeTracks(json)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (list.isEmpty()) return
+        scope.launch {
+            try {
+                entries.clear()
+                list.forEach { entries.add(Entry(it)) }
+                val idx = Prefs.playbackIndex.coerceIn(0, entries.size - 1)
+                rebuildOrder(idx)
+                val entry = entries[order[0]]
+                val audio = resolveEntry(entry)
+                if (audio == null) return@launch
+                val items = ArrayList<MediaItem>(1)
+                items.add(mediaItem(entry, audio))
+                val p = player ?: return@launch
+                windowStart = 0
+                p.setMediaItems(items, 0, 0L)
+                p.prepare()
+                currentEntry = entry
+                val savedPos = Prefs.playbackPosition
+                if (savedPos > 0) p.seekTo(savedPos)
+                if (Prefs.playbackPlaying) {
+                    userWantsPlay = true
+                    p.play()
+                    startTicker()
+                }
+                statusText = if (Prefs.playbackPlaying) "재생 중" else "일시정지"
+                publish()
+                fillWindow()
+            } catch (e: Exception) {
+                org.music.infiniteplayer.core.CrashLog.save(e)
+            }
+        }
     }
 
     fun playTrack(index: Int) {
@@ -523,6 +578,7 @@ class PlaybackService : MediaSessionService() {
     private fun startTicker() {
         if (ticker?.isActive == true) return
         ticker = scope.launch {
+            var saveTick = 0
             while (isActive) {
                 // 구간 반복 재생 : 끝을 넘으면 처음으로
                 if (sectionStartMs >= 0 && sectionEndMs > sectionStartMs) {
@@ -532,6 +588,21 @@ class PlaybackService : MediaSessionService() {
                     }
                 }
                 publish()
+                // 재생 위치를 주기적으로 저장 (서비스 죽어도 복원되도록)
+                saveTick++
+                if (saveTick % 8 == 0) {
+                    try {
+                        val p = player
+                        if (p != null && currentEntry != null) {
+                            Prefs.playbackPosition = p.currentPosition
+                            Prefs.playbackPlaying = p.isPlaying
+                            Prefs.playbackIndex = order.indexOf(
+                                entries.indexOfFirst { it.track.id == currentEntry?.track?.id }
+                            ).coerceAtLeast(0)
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
                 delay(250)
             }
         }

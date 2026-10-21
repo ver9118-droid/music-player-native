@@ -67,6 +67,27 @@ object Prefs {
         get() = sp.getString("visitor_data", "") ?: ""
         set(v) = sp.edit().putString("visitor_data", v).apply()
 
+    // ── 재생목록 복원용 (서비스가 죽어도 곡이 사라지지 않게) ──
+    /** 재생목록 전체 (JSON) */
+    var playbackQueue: String
+        get() = sp.getString("playback_queue", "") ?: ""
+        set(v) = sp.edit().putString("playback_queue", v).apply()
+
+    /** 재생목록에서 현재 곡의 인덱스 */
+    var playbackIndex: Int
+        get() = sp.getInt("playback_index", 0)
+        set(v) = sp.edit().putInt("playback_index", v).apply()
+
+    /** 현재 재생 위치 (ms) */
+    var playbackPosition: Long
+        get() = sp.getLong("playback_position", 0L)
+        set(v) = sp.edit().putLong("playback_position", v).apply()
+
+    /** 마지막으로 재생 중이었는지 */
+    var playbackPlaying: Boolean
+        get() = sp.getBoolean("playback_playing", false)
+        set(v) = sp.edit().putBoolean("playback_playing", v).apply()
+
     // ── 차트 캐시 (재실행 시 즉시 표시) ─────────────────────────
     fun cachedChart(sourceKey: String): String =
         sp.getString(KEY_CHART_PREFIX + sourceKey, "") ?: ""
