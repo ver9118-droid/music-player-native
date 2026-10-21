@@ -1142,7 +1142,7 @@ fun SettingsScreen(
                     )
                 }
             } else {
-                itemsIndexed(favorites, key = { _, t -> t.id }) { _, track ->
+                itemsIndexed(favorites, key = { index, t -> "${t.id}#$index" }) { _, track ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
