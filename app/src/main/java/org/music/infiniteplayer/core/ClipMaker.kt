@@ -15,7 +15,13 @@ import java.nio.ByteBuffer
  */
 object ClipMaker {
 
-    fun trim(source: File, startMs: Long, endMs: Long, dest: File): Boolean {
+    fun trim(
+        source: File,
+        startMs: Long,
+        endMs: Long,
+        dest: File,
+        mimeType: String = "audio/mp4",
+    ): Boolean {
         if (!source.exists() || source.length() < 1024) return false
         if (endMs <= startMs) return false
 
@@ -42,7 +48,13 @@ object ClipMaker {
                 dest.delete()
             } catch (_: Exception) {
             }
-            muxer = MediaMuxer(dest.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = MediaMuxer(
+                dest.absolutePath,
+                if (mimeType.contains("webm"))
+                    MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
+                else
+                    MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
+            )
             extractor.selectTrack(trackIndex)
             muxer.addTrack(format)
             muxer.start()

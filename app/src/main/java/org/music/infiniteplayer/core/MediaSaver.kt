@@ -1,4 +1,4 @@
-package org.music.infiniteplayer.core
+﻿package org.music.infiniteplayer.core
 
 import android.content.ContentValues
 import android.content.Context
@@ -24,17 +24,54 @@ object MediaSaver {
     private const val MUSIC_DIR = "Music/무한 음악 플레이어"
     private const val RING_DIR = "Music/Ringtones"
 
+    /**
+     * MIME 타입 정리.
+     * 유튜브는 `audio/mp4; codecs="mp4a.40.2"` 처럼 코덱 정보가 붙어오는데,
+     * MediaStore 는 `audio/mp4` 형태만 받아들인다. (그대로 넣으면 저장이 실패한다)
+     */
+    fun plainMime(mimeType: String?): String {
+        val base = (mimeType ?: "").substringBefore(";").trim()
+        return if (base.isEmpty() || !base.contains('/')) "audio/mp4" else base
+    }
+
+    /** 파일명 정리 (MediaStore 가 거절하는 문자 제거 + 길이 제한) */
+    fun safeName(name: String, fallback: String = "audio"): String {
+        var s = name.replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_")
+        s = s.replace(Regex("\\s+"), " ").trim()
+        if (s.length > 90) s = s.substring(0, 90).trim()
+        if (s.isEmpty()) s = fallback
+        return s
+    }
+
+    /** MIME 타입에 맞는 확장자 */
+    fun extensionFor(mimeType: String?): String {
+        val m = plainMime(mimeType)
+        return when {
+            m.contains("mp4") || m.contains("m4a") || m.contains("aac") -> "m4a"
+            m.contains("webm") -> "webm"
+            m.contains("ogg") -> "ogg"
+            m.contains("mpeg") -> "mp3"
+            m.contains("mp4a") -> "m4a"
+            else -> "m4a"
+        }
+    }
+
+    /** 저장 결과 (오류 사유 포함) */
+    data class SaveResult(val uri: Uri? = null, val error: String = "")
+
     /** 음악 라이브러리에 저장 */
     suspend fun saveToMusic(
         context: Context,
         file: File,
         displayName: String,
         mimeType: String,
-    ): Uri? = withContext(Dispatchers.IO) {
+    ): SaveResult = withContext(Dispatchers.IO) {
+        val mime = plainMime(mimeType)
+        val name = safeName(displayName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            insert(context, file, displayName, mimeType, MUSIC_DIR, isRingtone = false)
+            insert(context, file, name, mime, MUSIC_DIR, isRingtone = false)
         } else {
-            copyLegacy(context, file, displayName, mimeType, Environment.DIRECTORY_MUSIC)
+            copyLegacy(context, file, name, mime, Environment.DIRECTORY_MUSIC)
         }
     }
 
@@ -44,11 +81,13 @@ object MediaSaver {
         file: File,
         displayName: String,
         mimeType: String,
-    ): Uri? = withContext(Dispatchers.IO) {
+    ): SaveResult = withContext(Dispatchers.IO) {
+        val mime = plainMime(mimeType)
+        val name = safeName(displayName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            insert(context, file, displayName, mimeType, RING_DIR, isRingtone = true)
+            insert(context, file, name, mime, RING_DIR, isRingtone = true)
         } else {
-            copyLegacy(context, file, displayName, mimeType, Environment.DIRECTORY_RINGTONES)
+            copyLegacy(context, file, name, mime, Environment.DIRECTORY_RINGTONES)
         }
     }
 
@@ -59,31 +98,32 @@ object MediaSaver {
         mimeType: String,
         relativePath: String,
         isRingtone: Boolean,
-    ): Uri? {
+    ): SaveResult {
         val resolver = context.contentResolver
-        val values = ContentValues().apply {
-            put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
-            put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
-            put(MediaStore.Audio.Media.RELATIVE_PATH, relativePath)
-            put(MediaStore.Audio.Media.IS_PENDING, 1)
-            if (isRingtone) put(MediaStore.Audio.Media.IS_RINGTONE, 1)
-        }
-        val uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
-            ?: return null
-        return try {
+        var uri: Uri? = null
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
+                put(MediaStore.Audio.Media.RELATIVE_PATH, relativePath)
+                put(MediaStore.Audio.Media.IS_PENDING, 1)
+                if (isRingtone) put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+            }
+            uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return SaveResult(null, "MediaStore 삽입 실패 ($displayName)")
             resolver.openOutputStream(uri)?.use { out ->
                 file.inputStream().use { input -> input.copyTo(out) }
-            } ?: return null
+            } ?: return SaveResult(null, "파일 쓰기 실패")
             values.clear()
             values.put(MediaStore.Audio.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
-            uri
+            return SaveResult(uri, "")
         } catch (e: Exception) {
             try {
-                resolver.delete(uri, null, null)
+                uri?.let { resolver.delete(it, null, null) }
             } catch (_: Exception) {
             }
-            null
+            return SaveResult(null, e.message ?: e.javaClass.simpleName)
         }
     }
 
@@ -94,7 +134,7 @@ object MediaSaver {
         displayName: String,
         mimeType: String,
         type: String,
-    ): Uri? = withContext(Dispatchers.IO) {
+    ): SaveResult = withContext(Dispatchers.IO) {
         try {
             @Suppress("DEPRECATION")
             val dir = Environment.getExternalStoragePublicDirectory(type)
@@ -103,13 +143,15 @@ object MediaSaver {
             file.inputStream().use { input ->
                 dest.outputStream().use { out -> input.copyTo(out) }
             }
-            suspendCancellableCoroutine { cont ->
+            val uri = suspendCancellableCoroutine { cont ->
                 MediaScannerConnection.scanFile(
                     context, arrayOf(dest.absolutePath), arrayOf(mimeType)
-                ) { _, uri -> if (cont.isActive) cont.resume(uri) }
+                ) { _, scanned -> if (cont.isActive) cont.resume(scanned) }
             }
-        } catch (_: Exception) {
-            null
+            SaveResult(uri, "")
+        } catch (e: Exception) {
+            SaveResult(null, e.message ?: e.javaClass.simpleName)
         }
     }
 }
+

@@ -1,4 +1,4 @@
-package org.music.infiniteplayer.playback
+﻿package org.music.infiniteplayer.playback
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -811,11 +811,18 @@ class PlaybackService : MediaSessionService() {
         publish()
     }
 
+    /** 파일로 저장할 때 쓰는 오디오 (AAC/m4a 로 통일 → 벨소리·음악라이브러리 호환) */
+    private suspend fun resolveForFile(entry: Entry): ResolvedAudio? {
+        val current = entry.audio
+        if (current != null && current.mimeType.contains("mp4")) return current
+        return resolveEntry(entry, prefer = listOf(140, 139), useCache = false)
+    }
+
     /** 현재 곡을 기기(음악 라이브러리)에 저장 */
     fun downloadToDevice() {
         val entry = currentEntry ?: return
         scope.launch {
-            val audio = entry.audio ?: resolveEntry(entry)
+            val audio = resolveForFile(entry)
             if (audio == null) {
                 errorText = "스트림을 얻지 못했습니다"
                 publish()
@@ -825,22 +832,24 @@ class PlaybackService : MediaSessionService() {
             downloadProgress = 0
             statusText = "내려받는 중..."
             publish()
-            val ok = org.music.infiniteplayer.core.Downloader.download(audio.url, dest) { percent ->
+            val res = org.music.infiniteplayer.core.Downloader.download(audio.url, dest) { percent ->
                 downloadProgress = percent
                 publish()
             }
             downloadProgress = -1
-            if (!ok) {
-                errorText = "다운로드에 실패했습니다"
+            if (!res.ok) {
+                errorText = "다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
+                statusText = "다운로드 실패"
                 publish()
                 return@launch
             }
-            val name = safeFileName(entry.track)
-            val uri = org.music.infiniteplayer.core.MediaSaver.saveToMusic(
+            val name = safeFileName(entry.track, audio.mimeType)
+            val saved = org.music.infiniteplayer.core.MediaSaver.saveToMusic(
                 this@PlaybackService, dest, name, audio.mimeType,
             )
-            if (uri == null) {
-                errorText = "저장에 실패했습니다 (저장공간/권한 확인)"
+            if (saved.uri == null) {
+                errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
+                statusText = "저장 실패"
                 publish()
                 return@launch
             }
@@ -854,7 +863,7 @@ class PlaybackService : MediaSessionService() {
     fun setAsRingtone() {
         val entry = currentEntry ?: return
         scope.launch {
-            val audio = entry.audio ?: resolveEntry(entry)
+            val audio = resolveForFile(entry)
             if (audio == null) {
                 errorText = "스트림을 얻지 못했습니다"
                 publish()
@@ -865,19 +874,20 @@ class PlaybackService : MediaSessionService() {
                 downloadProgress = 0
                 statusText = "음원 준비 중..."
                 publish()
-                val ok = org.music.infiniteplayer.core.Downloader.download(audio.url, src) { percent ->
+                val res = org.music.infiniteplayer.core.Downloader.download(audio.url, src) { percent ->
                     downloadProgress = percent
                     publish()
                 }
                 downloadProgress = -1
-                if (!ok) {
-                    errorText = "다운로드에 실패했습니다"
+                if (!res.ok) {
+                    errorText = "다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
+                    statusText = "다운로드 실패"
                     publish()
                     return@launch
                 }
             }
             var file = src
-            val name = safeFileName(entry.track)
+            val name = safeFileName(entry.track, audio.mimeType)
             if (highlightStartMs >= 0 && highlightEndMs > highlightStartMs) {
                 val clipped = File(cacheDir, "ring_${entry.track.id.hashCode()}.m4a")
                 statusText = "구간 자르는 중..."
@@ -885,7 +895,7 @@ class PlaybackService : MediaSessionService() {
                 // 무거운 작업은 반드시 IO 스레드에서 (메인 스레드 차단 방지)
                 val trimmed = withContext(Dispatchers.IO) {
                     org.music.infiniteplayer.core.ClipMaker.trim(
-                        src, highlightStartMs, highlightEndMs, clipped
+                        src, highlightStartMs, highlightEndMs, clipped, audio.mimeType
                     )
                 }
                 if (!trimmed) {
@@ -895,16 +905,17 @@ class PlaybackService : MediaSessionService() {
                 }
                 file = clipped
             }
-            val uri = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
+            val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
                 this@PlaybackService, file, name, audio.mimeType,
             )
-            if (uri == null) {
-                errorText = "벨소리 저장에 실패했습니다"
+            if (saved.uri == null) {
+                errorText = "벨소리 저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
+                statusText = "저장 실패"
                 publish()
                 return@launch
             }
             val ok = withContext(Dispatchers.IO) {
-                org.music.infiniteplayer.core.RingtoneSetter.setRingtone(this@PlaybackService, uri)
+                org.music.infiniteplayer.core.RingtoneSetter.setRingtone(this@PlaybackService, saved.uri)
             }
             errorText = ""
             statusText = if (ok) "벨소리로 설정했습니다" else "벨소리로 저장했습니다 (설정에서 선택)"
@@ -919,9 +930,14 @@ class PlaybackService : MediaSessionService() {
         return "%d:%02d".format(total / 60, total % 60)
     }
 
-    private fun safeFileName(track: Track): String {        val raw = if (track.artist.isNotBlank()) "${track.artist} - ${track.title}" else track.title
-        val cleaned = raw.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "audio" }
-        return if (cleaned.endsWith(".m4a")) cleaned else "$cleaned.m4a"
+    /** 파일명 (확장자는 실제 포맷에 맞춘다) */
+    private fun safeFileName(track: Track, mimeType: String): String {
+        val raw = if (track.artist.isNotBlank()) "${track.artist} - ${track.title}" else track.title
+        var s = raw.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
+        val ext = org.music.infiniteplayer.core.MediaSaver.extensionFor(mimeType)
+        if (s.lowercase().endsWith(".$ext")) s = s.substring(0, s.length - ext.length - 1)
+        s = s.trim().ifBlank { "audio" }
+        return "$s.$ext"
     }
 
     // ── 오류 복구 ───────────────────────────────────────────────
@@ -1092,3 +1108,4 @@ class PlaybackService : MediaSessionService() {
         return error.errorCodeName
     }
 }
+
