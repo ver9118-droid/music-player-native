@@ -80,8 +80,14 @@ object PlayerBus {
 
     fun attach(svc: PlaybackService) {
         service = svc
-        pending?.let { it(svc) }
-        pending = null
+        pending?.let { cmd ->
+            pending = null
+            try {
+                cmd(svc)
+            } catch (e: Exception) {
+                org.music.infiniteplayer.core.CrashLog.save(e)
+            }
+        }
     }
 
     fun detach(svc: PlaybackService) {
@@ -90,10 +96,22 @@ object PlayerBus {
 
     fun isAttached(): Boolean = service != null
 
-    /** 서비스에 명령을 전달한다. (서비스가 아직 없으면 준비되면 실행) */
+    /**
+     * 서비스에 명령을 전달한다.
+     * 서비스가 아직 없으면 대기열에 넣고, 서비스가 살아나면 실행한다.
+     */
     fun post(block: (PlaybackService) -> Unit) {
         val svc = service
-        if (svc != null) block(svc) else pending = block
+        if (svc != null) {
+            try {
+                block(svc)
+            } catch (e: Exception) {
+                org.music.infiniteplayer.core.CrashLog.save(e)
+            }
+            pending = null
+        } else {
+            pending = block
+        }
     }
 
     internal fun publish(next: PlayerState) {
