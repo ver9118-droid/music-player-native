@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -369,7 +370,7 @@ class PlaybackService : MediaSessionService() {
             windowStart += curIdx
         }
         var added = 0
-        while (added < 2 && isActive) {
+        while (added < 2 && currentCoroutineContext().isActive) {
             val wantPos = windowStart + p.mediaItemCount
             if (wantPos >= order.size) {
                 if (!infinite) break
