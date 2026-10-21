@@ -179,9 +179,10 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // 앱을 최근 목록에서 밀어내더라도 세션(차량 블루투스/알림)은 유지한다.
-        // 재생 중이 아니어도 서비스를 바로 죽이지 않는다.
-        // (죽으면 UI 는 살아있는데 명령이 전달되지 않아 버튼이 먹통이 된다)
+        // 앱을 최근 목록에서 밀어내더라도 서비스를 죽이지 않는다.
+        //  - 활성 세션(UI 의 MediaController 연결)이면 Media3 가 유지한다
+        //  - 비활성이어도 재생 중이면 반드시 유지한다
+        if (player?.isPlaying == true) return
         super.onTaskRemoved(rootIntent)
     }
 
@@ -594,9 +595,10 @@ class PlaybackService : MediaSessionService() {
                         if (p != null && currentEntry != null) {
                             Prefs.playbackPosition = p.currentPosition
                             Prefs.playbackPlaying = p.isPlaying
-                            Prefs.playbackIndex = order.indexOf(
-                                entries.indexOfFirst { it.track.id == currentEntry?.track?.id }
-                            ).coerceAtLeast(0)
+                            // 목록 인덱스로 저장 (복원 시 order 가 아니라 목록 기준)
+                            Prefs.playbackIndex = entries.indexOfFirst {
+                                it.track.id == currentEntry?.track?.id
+                            }.coerceAtLeast(0)
                         }
                     } catch (_: Exception) {
                     }
@@ -689,6 +691,7 @@ class PlaybackService : MediaSessionService() {
                     systemVolume = systemVolumeText(),
                     audioRoute = audioRouteText(),
                     serviceState = serviceStateText(),
+                    notificationState = notificationStateText(),
                     uiLatency = uiLatencyText(),
                 )
             )
@@ -711,6 +714,25 @@ class PlaybackService : MediaSessionService() {
             }
         } catch (e: Exception) {
             "확인 불가: ${e.javaClass.simpleName}"
+        }
+    }
+
+    /** 포그라운드 알림이 표시되고 있는지 (안 보이면 시스템이 서비스를 정리할 수 있음) */
+    private fun notificationStateText(): String {
+        return try {
+            val nm = getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+                    as android.app.NotificationManager
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) {
+                return "확인 불가"
+            }
+            val mine = nm.activeNotifications.filter { it.notification.packageName == packageName }
+            when (mine.size) {
+                0 -> "알림 없음"
+                1 -> "알림 1개"
+                else -> "알림 ${mine.size}개"
+            }
+        } catch (e: Exception) {
+            "확인 불가"
         }
     }
 

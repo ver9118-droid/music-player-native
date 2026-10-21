@@ -27,6 +27,7 @@ data class Diagnostics(
     val systemVolume: String = "",
     val audioRoute: String = "",
     val serviceState: String = "",
+    val notificationState: String = "",
     val uiLatency: String = "",
 )
 
