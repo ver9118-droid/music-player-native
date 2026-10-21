@@ -32,7 +32,12 @@ class MainActivity : ComponentActivity() {
 
         // 서비스(백그라운드 재생 + 차량 블루투스 세션)를 먼저 띄워둔다.
         // 앱이 포그라운드일 때 호출하므로 startService 로도 안전하다.
-        startService(Intent(this, PlaybackService::class.java))
+        // (일부 기기에서 서비스 시작이 거부돼도 앱은 계속 동작해야 한다)
+        try {
+            startService(Intent(this, PlaybackService::class.java))
+        } catch (e: Exception) {
+            org.music.infiniteplayer.core.CrashLog.save(e)
+        }
 
         setContent {
             AppTheme {

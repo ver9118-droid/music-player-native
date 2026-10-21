@@ -120,6 +120,19 @@ class PlaybackService : MediaSessionService() {
     // ── 생애주기 ───────────────────────────────────────────────
     override fun onCreate() {
         super.onCreate()
+        try {
+            initPlayer()
+        } catch (e: Exception) {
+            // 서비스 초기화 실패가 앱 전체를 죽이지 않도록
+            org.music.infiniteplayer.core.CrashLog.save(e)
+            errorText = "재생 엔진 초기화 실패: ${e.message ?: e.javaClass.simpleName}"
+        }
+        PlayerBus.attach(this)
+        startDiagnosticsLoop()
+        publish()
+    }
+
+    private fun initPlayer() {
         youtube = YoutubeRepository(Prefs.quality)
 
         repeatMode = Prefs.repeat
@@ -158,10 +171,6 @@ class PlaybackService : MediaSessionService() {
             onCallStarted = { onCallStarted() },
             onCallEnded = { onCallEnded() },
         ).also { it.start() }
-
-        PlayerBus.attach(this)
-        startDiagnosticsLoop()
-        publish()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
