@@ -19,10 +19,12 @@ import org.music.infiniteplayer.data.YoutubeRepository
 import org.music.infiniteplayer.data.decodeTracks
 import org.music.infiniteplayer.data.encodeTracks
 import org.music.infiniteplayer.playback.PlayerBus
+import org.music.infiniteplayer.playback.PlayerState
 
 private const val PAGE_HOME = 0
 private const val PAGE_PLAYER = 1
 private const val PAGE_SETTINGS = 2
+private const val PAGE_DIAG = 3
 
 @Composable
 fun RootScreen() {
@@ -76,6 +78,9 @@ fun RootScreen() {
                     favorites = loadFavorites()
                 }
             },
+            onRetry = { PlayerBus.post { it.retryCurrent() } },
+            onDownload = { PlayerBus.post { it.downloadAndPlay() } },
+            onRaiseVolume = { PlayerBus.post { it.raiseSystemVolume() } },
             onBack = { page = PAGE_HOME },
             onTogglePlay = { PlayerBus.post { it.toggle() } },
             onNext = { PlayerBus.post { it.next() } },
@@ -92,6 +97,7 @@ fun RootScreen() {
             quality = quality,
             favorites = favorites,
             onBack = { page = PAGE_HOME },
+            onOpenDiagnostics = { page = PAGE_DIAG },
             onVolume = { v -> PlayerBus.post { it.setVolume(v) } },
             onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
             onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
@@ -110,6 +116,13 @@ fun RootScreen() {
             },
         )
 
+        PAGE_DIAG -> DiagnosticsScreen(
+            state = state,
+            onBack = { page = PAGE_SETTINGS },
+            onRetry = { PlayerBus.post { it.retryCurrent() } },
+            onDownload = { PlayerBus.post { it.downloadAndPlay() } },
+        )
+
         else -> HomeScreen(
             tracks = tracks,
             state = state,
@@ -123,12 +136,13 @@ fun RootScreen() {
             },
             onOpenPlayer = { page = PAGE_PLAYER },
             onOpenSettings = { page = PAGE_SETTINGS },
+            onRetry = { PlayerBus.post { it.retryCurrent() } },
         )
     }
 }
 
 /** 현재 재생 중인 곡의 id (목록에서 찾기) */
-private fun currentTrackId(state: org.music.infiniteplayer.playback.PlayerState, tracks: List<Track>): String {
+private fun currentTrackId(state: PlayerState, tracks: List<Track>): String {
     if (state.index in tracks.indices) return tracks[state.index].id
     return tracks.firstOrNull { it.title == state.title && it.artist == state.artist }?.id ?: ""
 }

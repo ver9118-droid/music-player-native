@@ -44,24 +44,25 @@ class YoutubeRepository(var quality: String = "high") {
     }
 
     /** 차트 곡 → 실제 재생 가능한 오디오 URL. */
-    suspend fun resolve(track: Track): ResolvedAudio? = withContext(Dispatchers.IO) {
-        var videoId = track.videoId
-        var title = track.title
-        var artist = track.artist
-        var thumb = track.thumbUrl
-        var duration = track.durationMs
+    suspend fun resolve(track: Track, preferItags: List<Int>? = null): ResolvedAudio? =
+        withContext(Dispatchers.IO) {
+            var videoId = track.videoId
+            var title = track.title
+            var artist = track.artist
+            var thumb = track.thumbUrl
+            var duration = track.durationMs
 
-        if (videoId.isBlank()) {
-            val results = search(buildQuery(track), 10)
-            val best = pickBest(results, track) ?: return@withContext null
-            videoId = best.videoId
-            title = best.title
-            artist = best.artist
-            thumb = best.thumbUrl
-            duration = best.durationMs
+            if (videoId.isBlank()) {
+                val results = search(buildQuery(track), 10)
+                val best = pickBest(results, track) ?: return@withContext null
+                videoId = best.videoId
+                title = best.title
+                artist = best.artist
+                thumb = best.thumbUrl
+                duration = best.durationMs
+            }
+            resolveVideo(videoId, title, artist, thumb, duration, preferItags)
         }
-        resolveVideo(videoId, title, artist, thumb, duration)
-    }
 
     private fun resolveVideo(
         videoId: String,
@@ -69,6 +70,7 @@ class YoutubeRepository(var quality: String = "high") {
         artist: String,
         thumb: String,
         duration: Long,
+        preferItags: List<Int>? = null,
     ): ResolvedAudio? {
         for (client in CLIENTS) {
             try {
@@ -88,7 +90,7 @@ class YoutubeRepository(var quality: String = "high") {
                 if (status != "OK") continue
 
                 val streaming = obj.optJSONObject("streamingData") ?: continue
-                val fmt = pickAudio(streaming.optJSONArray("adaptiveFormats")) ?: continue
+                val fmt = pickAudio(streaming.optJSONArray("adaptiveFormats"), preferItags) ?: continue
 
                 return ResolvedAudio(
                     videoId = videoId,
@@ -197,7 +199,7 @@ class YoutubeRepository(var quality: String = "high") {
     // ── 포맷 선택 ─────────────────────────────────────────────
     private data class Fmt(val itag: Int, val url: String, val mime: String, val bitrate: Int)
 
-    private fun pickAudio(formats: JSONArray?): Fmt? {
+    private fun pickAudio(formats: JSONArray?, preferItags: List<Int>?): Fmt? {
         if (formats == null) return null
         val list = ArrayList<Fmt>()
         for (i in 0 until formats.length()) {
@@ -209,7 +211,7 @@ class YoutubeRepository(var quality: String = "high") {
             list.add(Fmt(f.optInt("itag"), url, mime, f.optInt("bitrate")))
         }
         if (list.isEmpty()) return null
-        val preferred = QUALITY_ITAGS[quality] ?: QUALITY_ITAGS.getValue("high")
+        val preferred = preferItags ?: (QUALITY_ITAGS[quality] ?: QUALITY_ITAGS.getValue("high"))
         for (itag in preferred) {
             list.firstOrNull { it.itag == itag }?.let { return it }
         }

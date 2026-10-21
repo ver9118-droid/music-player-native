@@ -24,6 +24,13 @@ data class PlayerState(
     val error: String = "",
     val lyrics: List<LyricLine> = emptyList(),
     val callActive: Boolean = false,
+    // ── 진단 정보 ───────────────────────────────────────────
+    val playerState: String = "IDLE",     // ExoPlayer 실제 상태
+    val streamInfo: String = "",          // itag / mime
+    val streamProbe: String = "",         // 스트림 URL HTTP 응답 (예: HTTP 206)
+    val systemVolume: String = "",        // 시스템 미디어 볼륨 (예: 7/15)
+    val audioRoute: String = "",          // 출력 경로 (스피커/이어폰/블루투스…)
+    val downloadProgress: Int = -1,       // 로컬 다운로드 진행률 (-1 = 없음)
 )
 
 /**

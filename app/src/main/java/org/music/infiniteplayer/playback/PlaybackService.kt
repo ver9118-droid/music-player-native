@@ -22,6 +22,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.music.infiniteplayer.MainActivity
 import org.music.infiniteplayer.core.Images
 import org.music.infiniteplayer.core.Prefs
@@ -59,6 +60,7 @@ class PlaybackService : MediaSessionService() {
         @Volatile var audio: ResolvedAudio? = null
         @Volatile var thumb: File? = null
         @Volatile var job: Deferred<ResolvedAudio?>? = null
+        @Volatile var localFile: File? = null
     }
 
     private val entries = ArrayList<Entry>()
@@ -88,6 +90,13 @@ class PlaybackService : MediaSessionService() {
     private var ticker: Job? = null
     private var fillJob: Job? = null
     private var fillAgain = false
+
+    // ── 진단/복구 ────────────────────────────────────────────
+    private var streamProbe = "확인 안 됨"
+    private var streamInfo = ""
+    private var retryCount = 0
+    private var downloadProgress = -1
+    private var preparing = false
 
     private var repeatMode = "all"
     private var infinite = true
@@ -301,12 +310,17 @@ class PlaybackService : MediaSessionService() {
         val entry = entries.getOrNull(order.getOrNull(target) ?: -1) ?: return
         generation++
         pos = target
-        statusText = "'${entry.track.title}' 준비 중..."
+        retryCount = 0
+        downloadProgress = -1
         errorText = ""
+        statusText = "'${entry.track.title}' 준비 중..."
         publish()
 
         scope.launch {
+            preparing = true
+            publish()
             val audio = resolveEntry(entry)
+            preparing = false
             if (audio == null) {
                 errorText = "'${entry.track.title}' 을(를) 찾을 수 없습니다."
                 statusText = "재생 실패"
@@ -329,7 +343,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private suspend fun resolveEntry(entry: Entry): ResolvedAudio? {
+    private suspend fun resolveEntry(entry: Entry, prefer: List<Int>? = null): ResolvedAudio? {
         entry.audio?.let { return it }
         audioCache[entry.track.id]?.let {
             entry.audio = it
@@ -346,11 +360,12 @@ class PlaybackService : MediaSessionService() {
         val job = scope.async {
             try {
                 youtube.quality = Prefs.quality
-                val audio = youtube.resolve(entry.track)
+                val audio = youtube.resolve(entry.track, prefer)
                 if (audio != null) {
                     entry.audio = audio
                     entry.thumb = Images.cacheRemote(audio.thumbUrl)
                     rememberAudio(entry.track.id, audio)
+                    streamInfo = "itag ${audio.itag} · ${audio.mimeType.substringBefore(";")}"
                 }
                 audio
             } catch (_: Exception) {
@@ -419,8 +434,11 @@ class PlaybackService : MediaSessionService() {
             .setIsPlayable(true)
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
         entry.thumb?.let { md.setArtworkUri(Uri.fromFile(it)) }
+        // 로컬로 내려받은 파일이 있으면 그걸 재생 (직접 스트리밍 실패 대비)
+        val local = entry.localFile
+        val uri = if (local != null && local.exists()) Uri.fromFile(local) else Uri.parse(audio.url)
         return MediaItem.Builder()
-            .setUri(audio.url)
+            .setUri(uri)
             .setMediaId(entry.track.id)
             .setMediaMetadata(md.build())
             .build()
@@ -481,6 +499,7 @@ class PlaybackService : MediaSessionService() {
         val p = player
         val entry = currentEntry
         val track = entry?.track
+        refreshStatus()
         PlayerBus.publish(
             PlayerState(
                 playing = p?.isPlaying == true,
@@ -501,8 +520,77 @@ class PlaybackService : MediaSessionService() {
                 error = errorText,
                 lyrics = lyrics,
                 callActive = callPaused,
+                playerState = playerStateName(p?.playbackState),
+                streamInfo = streamInfo,
+                streamProbe = streamProbe,
+                systemVolume = systemVolumeText(),
+                audioRoute = audioRouteText(),
+                downloadProgress = downloadProgress,
             )
         )
+    }
+
+    /** ExoPlayer 의 실제 상태를 그대로 보여준다 (버퍼링/오류를 '재생 중'으로 덮지 않는다) */
+    private fun refreshStatus() {
+        val p = player
+        statusText = when {
+            callPaused -> "통화 중"
+            errorText.isNotBlank() -> "오류"
+            preparing -> "음원 준비 중..."
+            p == null -> "대기 중"
+            p.playbackState == Player.STATE_BUFFERING -> "버퍼링 중..."
+            p.playbackState == Player.STATE_READY -> if (p.isPlaying) "재생 중" else "일시정지"
+            p.playbackState == Player.STATE_ENDED -> "재생 종료"
+            p.playbackState == Player.STATE_IDLE -> "대기 중"
+            else -> "대기 중"
+        }
+    }
+
+    private fun playerStateName(state: Int?): String = when (state) {
+        Player.STATE_IDLE -> "IDLE"
+        Player.STATE_BUFFERING -> "BUFFERING"
+        Player.STATE_READY -> "READY"
+        Player.STATE_ENDED -> "ENDED"
+        else -> "UNKNOWN"
+    }
+
+    /** 시스템 미디어 볼륨 (0 이면 소리가 안 나옴) */
+    private fun systemVolumeText(): String {
+        return try {
+            val am = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val cur = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            "$cur / $max"
+        } catch (_: Exception) {
+            "-"
+        }
+    }
+
+    /** 현재 오디오 출력 경로 (스피커/이어폰/블루투스/차량) */
+    private fun audioRouteText(): String {
+        return try {
+            val am = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            val devices = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+            val names = devices.mapNotNull { d ->
+                when (d.type) {
+                    android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "스피커"
+                    android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "수화기"
+                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET -> "유선 이어폰"
+                    android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "유선 이어폰"
+                    android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "블루투스"
+                    android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "블루투스(통화)"
+                    android.media.AudioDeviceInfo.TYPE_USB_HEADSET -> "USB 이어폰"
+                    android.media.AudioDeviceInfo.TYPE_USB_DEVICE -> "USB"
+                    android.media.AudioDeviceInfo.TYPE_HDMI -> "HDMI"
+                    android.media.AudioDeviceInfo.TYPE_HDMI_ARC -> "HDMI ARC"
+                    android.media.AudioDeviceInfo.TYPE_AUX_LINE -> "AUX"
+                    else -> null
+                }
+            }.distinct()
+            if (names.isEmpty()) "알 수 없음" else names.joinToString(", ")
+        } catch (_: Exception) {
+            "-"
+        }
     }
 
     private fun openAppIntent(): PendingIntent {
@@ -584,24 +672,190 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            errorText = "재생 오류 (${error.errorCodeName})"
-            statusText = "오류"
+            val desc = describeError(error)
+            errorText = "재생 오류 ($desc)"
             publish()
-            // 스트림 주소 만료/변경 → 다시 해석해서 재시도
-            val entry = currentEntry ?: return
-            scope.launch {
-                entry.job = null
-                entry.audio = null
-                val audio = resolveEntry(entry) ?: return@launch
-                val p = player ?: return@launch
-                val idx = p.currentMediaItemIndex
-                if (idx >= 0) {
-                    p.replaceMediaItem(idx, mediaItem(entry, audio))
-                    errorText = ""
-                    statusText = "재생 중"
-                    publish()
-                }
+            recoverFromError(desc)
+        }
+    }
+
+    /** 시스템 미디어 볼륨이 0 이면 소리가 안 들린다. 60% 로 올려준다. */
+    fun raiseSystemVolume() {
+        try {
+            val am = getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            if (max <= 0) return
+            val target = (max * 0.6f).toInt().coerceIn(1, max)
+            am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, target, 0)
+            publish()
+        } catch (_: Exception) {
+        }
+    }
+
+    // ── 오류 복구 ───────────────────────────────────────────────
+    /**
+     * 재생 실패 시 자동 복구 순서
+     *   1) 같은 곡을 새 주소로 다시 해석 (만료/IP 바인딩 문제 해결)
+     *   2) 다른 포맷(itag)으로 재시도
+     *   3) 로컬 파일로 내려받아 재생
+     */
+    private fun recoverFromError(desc: String) {
+        val entry = currentEntry ?: return
+        val p = player ?: return
+        if (retryCount >= 3) {
+            errorText = "재생 오류 ($desc) · 재시도 실패"
+            publish()
+            return
+        }
+        retryCount++
+        val attempt = retryCount
+        if (attempt >= 3) {
+            // 마지막 시도 : 스트리밍 포기하고 파일로 받아서 재생
+            errorText = "스트리밍 실패 → 파일로 받는 중..."
+            publish()
+            downloadAndPlay()
+            return
+        }
+        scope.launch {
+            // 1) 현재 주소가 실제로 살아있는지 확인
+            val probe = probeUrl(entry.audio?.url.orEmpty())
+            streamProbe = probe
+            publish()
+
+            // 2) 새 주소로 재해석 (2번째 시도부터는 다른 포맷 사용)
+            val prefer = when (attempt) {
+                1 -> null
+                2 -> listOf(251, 140, 249, 139)
+                else -> listOf(139, 249, 140, 251)
+            }
+            entry.job = null
+            entry.audio = null
+            entry.localFile = null
+            val audio = resolveEntry(entry, prefer)
+            if (audio == null) {
+                errorText = "재생 오류 ($desc) · 스트림을 얻지 못했습니다"
+                publish()
+                return@launch
+            }
+            streamInfo = "itag ${audio.itag} · ${audio.mimeType.substringBefore(";")}"
+            publish()
+
+            val idx = p.currentMediaItemIndex
+            if (idx >= 0) {
+                p.replaceMediaItem(idx, mediaItem(entry, audio))
+                errorText = ""
+                publish()
+                return@launch
+            }
+            // 플레이어에 아이템이 없으면 새로 만들어서 재생
+            playEntry(entry)
+        }
+    }
+
+    /** 사용자가 직접 "다시 시도"를 눌렀을 때 */
+    fun retryCurrent() {
+        val entry = currentEntry ?: return
+        retryCount = 0
+        errorText = ""
+        streamProbe = "확인 중..."
+        publish()
+        scope.launch {
+            entry.job = null
+            entry.audio = null
+            val audio = resolveEntry(entry)
+            if (audio == null) {
+                errorText = "스트림을 얻지 못했습니다 (네트워크 확인)"
+                publish()
+                return@launch
+            }
+            streamInfo = "itag ${audio.itag} · ${audio.mimeType.substringBefore(";")}"
+            playEntry(entry)
+        }
+    }
+
+    /** 로컬 파일로 내려받아 재생 (직접 스트리밍이 안 될 때 대체 경로) */
+    fun downloadAndPlay() {
+        val entry = currentEntry ?: return
+        scope.launch {
+            val audio = entry.audio ?: resolveEntry(entry)
+            if (audio == null) {
+                errorText = "스트림 주소를 얻지 못했습니다 (네트워크 확인)"
+                publish()
+                return@launch
+            }
+            val url = audio.url
+            downloadProgress = 0
+            statusText = "음원 내려받는 중..."
+            publish()
+            val dest = File(cacheDir, "audio_${entry.track.id.hashCode()}.m4a")
+            val ok = org.music.infiniteplayer.core.Downloader.download(url, dest) { percent ->
+                downloadProgress = percent
+                publish()
+            }
+            downloadProgress = -1
+            if (!ok) {
+                errorText = "음원 내려받기에 실패했습니다 (주소 만료 또는 네트워크 차단)"
+                publish()
+                return@launch
+            }
+            entry.localFile = dest
+            entry.audio = audio
+            errorText = ""
+            playEntry(entry)
+        }
+    }
+
+    private fun playEntry(entry: Entry) {
+        val p = player ?: return
+        val audio = entry.audio ?: return
+        val items = ArrayList<MediaItem>(1)
+        items.add(mediaItem(entry, audio))
+        val entryIdx = entries.indexOf(entry)
+        val orderPos = order.indexOf(entryIdx)
+        if (orderPos >= 0) pos = orderPos
+        windowStart = if (orderPos >= 0) orderPos else 0
+        p.setMediaItems(items, 0, 0L)
+        p.prepare()
+        currentEntry = entry
+        userWantsPlay = true
+        p.play()
+        startTicker()
+        onTrackChanged(entry)
+        fillWindow()
+        publish()
+    }
+
+    /** 스트림 주소가 응답하는지 확인 ( diagnostik 용 + 복구 판단용 ) */
+    private suspend fun probeUrl(url: String): String {
+        if (url.isBlank()) return "주소 없음"
+        return withContext(Dispatchers.IO) {
+            try {
+                val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection)
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("Range", "bytes=0-1023")
+                conn.connectTimeout = 8000
+                conn.readTimeout = 8000
+                conn.instanceFollowRedirects = true
+                conn.setRequestProperty("User-Agent", org.music.infiniteplayer.core.Net.UA_YT)
+                val code = conn.responseCode
+                conn.disconnect()
+                "HTTP $code"
+            } catch (e: Exception) {
+                e.javaClass.simpleName
             }
         }
+    }
+
+    private fun describeError(error: PlaybackException): String {
+        var cause: Throwable? = error.cause
+        while (cause != null) {
+            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                return "HTTP ${cause.responseCode}"
+            }
+            if (cause is java.net.SocketTimeoutException) return "시간 초과"
+            if (cause is java.net.UnknownHostException) return "DNS 실패"
+            cause = cause.cause
+        }
+        return error.errorCodeName
     }
 }

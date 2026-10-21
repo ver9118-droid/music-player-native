@@ -55,6 +55,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,6 +87,7 @@ fun HomeScreen(
     onTrackClick: (Int) -> Unit,
     onOpenPlayer: () -> Unit,
     onOpenSettings: () -> Unit,
+    onRetry: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -124,6 +127,35 @@ fun HomeScreen(
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
                 Text(message, color = Danger, fontSize = 13.sp)
+            }
+        }
+
+        // 재생 오류 안내
+        if (state.error.isNotBlank()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Danger.copy(alpha = 0.14f))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    state.error,
+                    color = Danger,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Accent)
+                        .clickable { onRetry() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text("다시 시도", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
@@ -271,6 +303,9 @@ fun NowPlayingScreen(
     state: PlayerState,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
+    onRetry: () -> Unit,
+    onDownload: () -> Unit,
+    onRaiseVolume: () -> Unit,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
@@ -462,7 +497,182 @@ fun NowPlayingScreen(
             )
             if (state.infinite) StatusChip("무한 재생", Accent)
             if (state.callActive) StatusChip("통화 중", Danger)
+            if (state.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
         }
+
+        // 시스템 볼륨이 0 이면 소리가 안 난다 (가장 흔한 원인)
+        if (state.systemVolume.startsWith("0 ")) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AccentSoft.copy(alpha = 0.16f))
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "시스템 미디어 볼륨이 0 입니다 (소리가 나지 않는 원인)",
+                    color = AccentSoft,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AccentSoft)
+                        .clickable(onClick = onRaiseVolume)
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                ) {
+                    Text("볼륨 올리기", color = Color(0xFF04231C), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
+        // 오류 안내 + 복구 버튼
+        if (state.error.isNotBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Danger.copy(alpha = 0.13f))
+                    .padding(12.dp),
+            ) {
+                Column {
+                    Text(state.error, color = Danger, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Accent)
+                                .clickable(onClick = onRetry)
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                        ) {
+                            Text("다시 시도", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Surface2)
+                                .clickable(onClick = onDownload)
+                                .padding(horizontal = 14.dp, vertical = 7.dp),
+                        ) {
+                            Text(
+                                text = if (state.downloadProgress >= 0)
+                                    "내려받는 중 ${state.downloadProgress}%" else "파일로 받기",
+                                color = TextSecondary,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
+/** 재생 진단 화면 */
+@Composable
+fun DiagnosticsScreen(
+    state: PlayerState,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    val report = remember(state) {
+        buildString {
+            appendLine("무한 음악 플레이어 진단")
+            appendLine("곡: ${state.title} / ${state.artist}")
+            appendLine("상태: ${state.status} (player=${state.playerState}, playing=${state.playing}, buffering=${state.buffering})")
+            appendLine("스트림: ${state.streamInfo}")
+            appendLine("주소 응답: ${state.streamProbe}")
+            appendLine("시스템 볼륨: ${state.systemVolume}")
+            appendLine("출력 경로: ${state.audioRoute}")
+            appendLine("앱 볼륨: ${state.volume}")
+            appendLine("오류: ${state.error.ifBlank { "없음" }}")
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg)
+            .padding(horizontal = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Rounded.ArrowBack, "뒤로", tint = TextPrimary)
+            }
+            Text("재생 진단", color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+        }
+
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            item {
+                Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
+                    DiagRow("재생 상태", "${state.status}  (${state.playerState})")
+                    DiagRow("재생 중", if (state.playing) "예" else "아니오")
+                    DiagRow("버퍼링", if (state.buffering) "예" else "아니오")
+                    DiagRow("스트림", state.streamInfo.ifBlank { "-" })
+                    DiagRow("주소 응답", state.streamProbe.ifBlank { "-" })
+                    DiagRow("시스템 볼륨", state.systemVolume.ifBlank { "-" })
+                    DiagRow("출력 경로", state.audioRoute.ifBlank { "-" })
+                    DiagRow("앱 볼륨", "%.0f%%".format(state.volume * 100))
+                    DiagRow("오류", state.error.ifBlank { "없음" })
+                    if (state.downloadProgress >= 0) {
+                        DiagRow("다운로드", "${state.downloadProgress}%")
+                    }
+                }
+            }
+            item {
+                Column(Modifier.padding(horizontal = 18.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ActionButton("다시 시도", Accent, Color.White, onRetry)
+                        ActionButton("파일로 받기", Surface2, TextPrimary, onDownload)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    ActionButton("진단 내용 복사", Surface2, TextPrimary) {
+                        clipboard.setText(AnnotatedString(report))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "소리가 안 나면 '시스템 볼륨'이 0 인지, '주소 응답'이 403 인지 먼저 확인하세요.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                    )
+                }
+            }
+            item { VSpace(30.dp) }
+        }
+    }
+}
+
+@Composable
+private fun DiagRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+        Text(label, color = TextSecondary, fontSize = 13.sp, modifier = Modifier.width(96.dp))
+        Text(value, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun ActionButton(text: String, bg: Color, fg: Color, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Text(text, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -533,6 +743,7 @@ fun SettingsScreen(
     state: PlayerState,
     quality: String,
     onBack: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onVolume: (Float) -> Unit,
     onShuffle: (Boolean) -> Unit,
     onRepeat: (String) -> Unit,
@@ -684,6 +895,24 @@ fun SettingsScreen(
                                 modifier = Modifier.size(20.dp),
                             )
                         }
+                    }
+                }
+            }
+
+            item {
+                SectionTitle("재생 진단")
+                SettingRow(
+                    title = "진단 정보 보기",
+                    subtitle = "소리가 안 나거나 재생이 안 될 때 확인하세요",
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Surface2)
+                            .clickable(onClick = onOpenDiagnostics)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Text("열기", color = Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
