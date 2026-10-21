@@ -3,6 +3,8 @@ package org.music.infiniteplayer.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -39,6 +42,7 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
@@ -434,6 +438,10 @@ fun NowPlayingScreen(
     onShuffle: (Boolean) -> Unit,
     onRepeat: (String) -> Unit,
     onInfinite: (Boolean) -> Unit,
+    onSection: (Long, Long) -> Unit,
+    onMarkStart: () -> Unit,
+    onMarkEnd: () -> Unit,
+    onRingtone: () -> Unit,
 ) {
     var showLyrics by remember { mutableStateOf(false) }
 
@@ -535,7 +543,21 @@ fun NowPlayingScreen(
             Text(formatTime(state.durationMs), color = TextSecondary, fontSize = 11.5.sp)
         }
 
-        Spacer(Modifier.height(6.dp))
+        // 구간/벨소리/다운로드
+        ActionChips(
+            state = state,
+            onFirstHalf = { onSection(0L, state.durationMs / 2) },
+            onSecondHalf = { onSection(state.durationMs / 2, state.durationMs) },
+            onMarkStart = onMarkStart,
+            onMarkEnd = onMarkEnd,
+            onPlayHighlight = {
+                onSection(state.highlightStartMs, state.highlightEndMs)
+            },
+            onRingtone = onRingtone,
+            onDownload = onDownload,
+        )
+
+        Spacer(Modifier.height(10.dp))
 
         // 재생 컨트롤
         EvenRow {
@@ -792,6 +814,84 @@ private fun ActionButton(text: String, bg: Color, fg: Color, onClick: () -> Unit
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Text(text, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** 구간 · 벨소리 · 다운로드 칩 */
+@Composable
+private fun ActionChips(
+    state: PlayerState,
+    onFirstHalf: () -> Unit,
+    onSecondHalf: () -> Unit,
+    onMarkStart: () -> Unit,
+    onMarkEnd: () -> Unit,
+    onPlayHighlight: () -> Unit,
+    onRingtone: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    val hasHighlight = state.highlightStartMs >= 0 && state.highlightEndMs > state.highlightStartMs
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SmallChip("전반부", false, null) { onFirstHalf() }
+        SmallChip("후반부", false, null) { onSecondHalf() }
+        SmallChip(
+            text = if (state.highlightStartMs >= 0) "A ${formatTime(state.highlightStartMs)}" else "A 지정",
+            selected = state.highlightStartMs >= 0,
+            icon = null,
+        ) { onMarkStart() }
+        SmallChip(
+            text = if (state.highlightEndMs >= 0) "B ${formatTime(state.highlightEndMs)}" else "B 지정",
+            selected = state.highlightEndMs >= 0,
+            icon = null,
+        ) { onMarkEnd() }
+        if (hasHighlight) {
+            SmallChip("하이라이트", true, null) { onPlayHighlight() }
+        }
+        SmallChip("벨소리", false, Icons.Rounded.Notifications) { onRingtone() }
+        SmallChip(
+            text = if (state.downloadProgress >= 0) "내려받는 중 ${state.downloadProgress}%" else "다운로드",
+            selected = false,
+            icon = Icons.Rounded.Download,
+        ) { onDownload() }
+    }
+}
+
+@Composable
+private fun SmallChip(
+    text: String,
+    selected: Boolean,
+    icon: ImageVector?,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) Accent.copy(alpha = 0.22f) else Surface1)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (icon != null) {
+            Icon(
+                icon,
+                null,
+                tint = if (selected) Accent else TextSecondary,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            text = text,
+            color = if (selected) Accent else TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+        )
     }
 }
 

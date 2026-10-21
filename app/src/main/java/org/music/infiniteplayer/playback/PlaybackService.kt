@@ -98,6 +98,12 @@ class PlaybackService : MediaSessionService() {
     private var downloadProgress = -1
     private var preparing = false
 
+    // ── 하이라이트 / 구간 반복 ────────────────────────────────
+    private var highlightStartMs = -1L
+    private var highlightEndMs = -1L
+    private var sectionStartMs = -1L
+    private var sectionEndMs = -1L
+
     private var repeatMode = "all"
     private var infinite = true
     private var shuffleOn = false
@@ -496,8 +502,15 @@ class PlaybackService : MediaSessionService() {
         if (ticker?.isActive == true) return
         ticker = scope.launch {
             while (isActive) {
+                // 구간 반복 재생 : 끝을 넘으면 처음으로
+                if (sectionStartMs >= 0 && sectionEndMs > sectionStartMs) {
+                    val p = player
+                    if (p != null && p.currentPosition >= sectionEndMs) {
+                        p.seekTo(sectionStartMs)
+                    }
+                }
                 publish()
-                delay(500)
+                delay(250)
             }
         }
     }
@@ -538,6 +551,10 @@ class PlaybackService : MediaSessionService() {
                 systemVolume = systemVolumeText(),
                 audioRoute = audioRouteText(),
                 downloadProgress = downloadProgress,
+                highlightStartMs = highlightStartMs,
+                highlightEndMs = highlightEndMs,
+                sectionStartMs = sectionStartMs,
+                sectionEndMs = sectionEndMs,
             )
         )
     }
@@ -702,6 +719,169 @@ class PlaybackService : MediaSessionService() {
             publish()
         } catch (_: Exception) {
         }
+    }
+
+    // ── 하이라이트 / 구간 반복 ─────────────────────────────────
+    /** 현재 위치를 하이라이트 시작점(A)으로 지정 */
+    fun markHighlightStart() {
+        val pos = player?.currentPosition ?: return
+        highlightStartMs = pos
+        if (highlightEndMs in 0 until pos) highlightEndMs = -1L
+        sectionStartMs = -1L
+        sectionEndMs = -1L
+        statusText = "하이라이트 시작 ${formatTime(pos)}"
+        publish()
+    }
+
+    /** 현재 위치를 하이라이트 끝점(B)으로 지정 */
+    fun markHighlightEnd() {
+        val pos = player?.currentPosition ?: return
+        if (highlightStartMs < 0) {
+            markHighlightStart()
+            return
+        }
+        if (pos <= highlightStartMs) {
+            highlightEndMs = -1L
+            statusText = "시작점보다 뒤에서 지정하세요"
+        } else {
+            highlightEndMs = pos
+            statusText = "하이라이트 ${formatTime(highlightStartMs)} ~ ${formatTime(pos)}"
+        }
+        publish()
+    }
+
+    fun clearHighlight() {
+        highlightStartMs = -1L
+        highlightEndMs = -1L
+        publish()
+    }
+
+    /** 지정 구간만 반복 재생 (전반부/후반부/하이라이트) */
+    fun playSection(startMs: Long, endMs: Long) {
+        val p = player ?: return
+        if (endMs <= startMs) return
+        sectionStartMs = startMs
+        sectionEndMs = endMs
+        p.seekTo(startMs)
+        p.play()
+        userWantsPlay = true
+        statusText = "구간 반복 ${formatTime(startMs)} ~ ${formatTime(endMs)}"
+        startTicker()
+        publish()
+    }
+
+    fun clearSection() {
+        sectionStartMs = -1L
+        sectionEndMs = -1L
+        publish()
+    }
+
+    /** 현재 곡을 기기(음악 라이브러리)에 저장 */
+    fun downloadToDevice() {
+        val entry = currentEntry ?: return
+        scope.launch {
+            val audio = entry.audio ?: resolveEntry(entry)
+            if (audio == null) {
+                errorText = "스트림을 얻지 못했습니다"
+                publish()
+                return@launch
+            }
+            val dest = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
+            downloadProgress = 0
+            statusText = "내려받는 중..."
+            publish()
+            val ok = org.music.infiniteplayer.core.Downloader.download(audio.url, dest) { percent ->
+                downloadProgress = percent
+                publish()
+            }
+            downloadProgress = -1
+            if (!ok) {
+                errorText = "다운로드에 실패했습니다"
+                publish()
+                return@launch
+            }
+            val name = safeFileName(entry.track)
+            val uri = org.music.infiniteplayer.core.MediaSaver.saveToMusic(
+                this@PlaybackService, dest, name, audio.mimeType,
+            )
+            if (uri == null) {
+                errorText = "저장에 실패했습니다 (저장공간/권한 확인)"
+                publish()
+                return@launch
+            }
+            errorText = ""
+            statusText = "다운로드 완료 · $name"
+            publish()
+        }
+    }
+
+    /** 벨소리로 설정 (하이라이트가 지정되어 있으면 그 구간만 사용) */
+    fun setAsRingtone() {
+        val entry = currentEntry ?: return
+        scope.launch {
+            val audio = entry.audio ?: resolveEntry(entry)
+            if (audio == null) {
+                errorText = "스트림을 얻지 못했습니다"
+                publish()
+                return@launch
+            }
+            val src = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
+            if (!src.exists() || src.length() < 1024) {
+                downloadProgress = 0
+                statusText = "음원 준비 중..."
+                publish()
+                val ok = org.music.infiniteplayer.core.Downloader.download(audio.url, src) { percent ->
+                    downloadProgress = percent
+                    publish()
+                }
+                downloadProgress = -1
+                if (!ok) {
+                    errorText = "다운로드에 실패했습니다"
+                    publish()
+                    return@launch
+                }
+            }
+            var file = src
+            val name = safeFileName(entry.track)
+            if (highlightStartMs >= 0 && highlightEndMs > highlightStartMs) {
+                val clipped = File(cacheDir, "ring_${entry.track.id.hashCode()}.m4a")
+                statusText = "구간 자르는 중..."
+                publish()
+                if (!org.music.infiniteplayer.core.ClipMaker.trim(
+                        src, highlightStartMs, highlightEndMs, clipped
+                    )
+                ) {
+                    errorText = "구간 자르기에 실패했습니다"
+                    publish()
+                    return@launch
+                }
+                file = clipped
+            }
+            val uri = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
+                this@PlaybackService, file, name, audio.mimeType,
+            )
+            if (uri == null) {
+                errorText = "벨소리 저장에 실패했습니다"
+                publish()
+                return@launch
+            }
+            val ok = org.music.infiniteplayer.core.RingtoneSetter.setRingtone(this@PlaybackService, uri)
+            errorText = ""
+            statusText = if (ok) "벨소리로 설정했습니다" else "벨소리로 저장했습니다 (설정에서 선택)"
+            publish()
+        }
+    }
+
+    /** mm:ss */
+    private fun formatTime(ms: Long): String {
+        if (ms <= 0) return "0:00"
+        val total = ms / 1000
+        return "%d:%02d".format(total / 60, total % 60)
+    }
+
+    private fun safeFileName(track: Track): String {        val raw = if (track.artist.isNotBlank()) "${track.artist} - ${track.title}" else track.title
+        val cleaned = raw.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "audio" }
+        return if (cleaned.endsWith(".m4a")) cleaned else "$cleaned.m4a"
     }
 
     // ── 오류 복구 ───────────────────────────────────────────────

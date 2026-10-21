@@ -49,6 +49,10 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             wanted.add(Manifest.permission.READ_PHONE_STATE)
         }
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            // Android 9 이하 : 음악 라이브러리/벨소리 저장용
+            wanted.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
         if (wanted.isNotEmpty()) {
             permissionLauncher.launch(wanted.toTypedArray())
         }

@@ -31,6 +31,11 @@ data class PlayerState(
     val systemVolume: String = "",        // 시스템 미디어 볼륨 (예: 7/15)
     val audioRoute: String = "",          // 출력 경로 (스피커/이어폰/블루투스…)
     val downloadProgress: Int = -1,       // 로컬 다운로드 진행률 (-1 = 없음)
+    // ── 구간/하이라이트 ───────────────────────────────────────
+    val highlightStartMs: Long = -1,      // 하이라이트 시작점 (A)
+    val highlightEndMs: Long = -1,        // 하이라이트 끝점 (B)
+    val sectionStartMs: Long = -1,        // 반복 재생 구간 시작
+    val sectionEndMs: Long = -1,          // 반복 재생 구간 끝
 )
 
 /**

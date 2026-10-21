@@ -100,7 +100,7 @@ fun RootScreen() {
                     }
                 },
                 onRetry = { PlayerBus.post { it.retryCurrent() } },
-                onDownload = { PlayerBus.post { it.downloadAndPlay() } },
+                onDownload = { PlayerBus.post { it.downloadToDevice() } },
                 onRaiseVolume = { PlayerBus.post { it.raiseSystemVolume() } },
                 onBack = { page = PAGE_HOME },
                 onTogglePlay = { PlayerBus.post { it.toggle() } },
@@ -111,6 +111,10 @@ fun RootScreen() {
                 onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
                 onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
                 onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
+                onSection = { s, e -> PlayerBus.post { it.playSection(s, e) } },
+                onMarkStart = { PlayerBus.post { it.markHighlightStart() } },
+                onMarkEnd = { PlayerBus.post { it.markHighlightEnd() } },
+                onRingtone = { PlayerBus.post { it.setAsRingtone() } },
             )
 
             PAGE_SETTINGS -> SettingsScreen(
