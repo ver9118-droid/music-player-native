@@ -541,11 +541,18 @@ class PlaybackService : MediaSessionService() {
     /**
      * 상태 publish.
      *
-     * 주의 : AudioManager 호출(Binder)을 절대 넣지 않는다.
+     * 주의 1 : AudioManager 호출(Binder)을 절대 넣지 않는다.
      *   여기서 getDevices() 등을 호출하면 250ms마다 메인 스레드가 막혀
      *   화면이 얼어붙는다. 진단 정보는 refreshDiagnostics() 로 필요할 때만 갱신.
+     * 주의 2 : ExoPlayer 는 메인 스레드에서만 접근해야 한다.
+     *   (다른 스레드에서 접근하면 "Player is accessed on the wrong thread" 로 죽는다)
+     *   → 메인 스레드가 아니면 메인 스레드로 넘긴다.
      */
     private fun publish() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            scope.launch { publish() }
+            return
+        }
         val p = player
         val entry = currentEntry
         val track = entry?.track
@@ -586,23 +593,37 @@ class PlaybackService : MediaSessionService() {
         )
     }
 
-    /** 진단 정보 갱신 (진단 화면을 열 때만 호출) */
+    /**
+     * 진단 정보 갱신.
+     *
+     * 플레이어 상태는 메인 스레드에서 읽고(ExoPlayer 제약),
+     * AudioManager 조회는 IO 스레드에서 한다.
+     */
     fun refreshDiagnostics() {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            scope.launch { refreshDiagnostics() }
+            return
+        }
         val p = player
-        PlayerBus.publishDiagnostics(
-            Diagnostics(
-                playerState = playerStateName(p?.playbackState),
-                streamInfo = streamInfo,
-                streamProbe = streamProbe,
-                systemVolume = systemVolumeText(),
-                audioRoute = audioRouteText(),
+        val state = playerStateName(p?.playbackState)
+        val info = streamInfo
+        val probe = streamProbe
+        scope.launch(Dispatchers.IO) {
+            PlayerBus.publishDiagnostics(
+                Diagnostics(
+                    playerState = state,
+                    streamInfo = info,
+                    streamProbe = probe,
+                    systemVolume = systemVolumeText(),
+                    audioRoute = audioRouteText(),
+                )
             )
-        )
+        }
     }
 
     /** 진단 정보 주기적 갱신 (AudioManager 호출은 IO 스레드에서) */
     private fun startDiagnosticsLoop() {
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             while (isActive) {
                 try {
                     refreshDiagnostics()

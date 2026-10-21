@@ -1,4 +1,4 @@
-package org.music.infiniteplayer.core
+﻿package org.music.infiniteplayer.core
 
 import android.content.Context
 import java.io.File
@@ -113,6 +113,7 @@ object CrashLog {
 
     /** 앱 버전 정보 */
     object BuildInfo {
-        const val VERSION = "2.1.2"
+        const val VERSION = "2.1.3"
     }
 }
+
