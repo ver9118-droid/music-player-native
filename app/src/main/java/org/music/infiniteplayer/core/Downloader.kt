@@ -1,4 +1,4 @@
-package org.music.infiniteplayer.core
+﻿package org.music.infiniteplayer.core
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -22,7 +22,7 @@ object Downloader {
         try {
             // 유튜브 서버는 Range 없는 요청/열린 범위를 403 으로 막는다.
             // 반드시 닫힌 범위로 요청한다.
-            val (connection, total) = StreamRange.open(url, 0, androidx.media3.datasource.DataSpec.LENGTH_UNSET)
+            val (connection, total) = StreamRange.open(url, 0, StreamRange.LENGTH_UNSET)
             conn = connection
             val code = conn.responseCode
             if (code !in 200..299) {
@@ -64,3 +64,4 @@ object Downloader {
         }
     }
 }
+

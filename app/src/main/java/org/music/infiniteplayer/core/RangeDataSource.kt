@@ -1,4 +1,4 @@
-package org.music.infiniteplayer.core
+﻿package org.music.infiniteplayer.core
 
 import android.net.Uri
 import androidx.media3.common.C
@@ -22,6 +22,9 @@ import java.net.URL
  * 파일 크기는 URL 의 clen= 파라미터에 들어있고, 없으면 1 바이트 요청으로 알아낸다.
  */
 object StreamRange {
+
+    /** 길이 미지정 (C.LENGTH_UNSET 와 같은 값이지만 Long 타입) */
+    const val LENGTH_UNSET = -1L
 
     /** URL 의 clen= 파라미터에서 전체 길이 (없으면 -1) */
     fun contentLengthOf(url: String): Long {
@@ -90,7 +93,7 @@ object StreamRange {
                 setRequestProperty("User-Agent", Net.UA_YT)
                 setRequestProperty("Accept", "*/*")
             }
-            val end = if (length != DataSpec.LENGTH_UNSET) start + length - 1 else total - 1
+            val end = if (length != LENGTH_UNSET) start + length - 1 else total - 1
             if (end >= start) {
                 conn.setRequestProperty("Range", "bytes=$start-$end")
             }
@@ -121,7 +124,7 @@ class RangeDataSource : DataSource {
     private var transferListener: TransferListener? = null
     private var uri: Uri? = null
     private var currentSpec: DataSpec? = null
-    private var totalLength: Long = DataSpec.LENGTH_UNSET
+    private var totalLength: Long = StreamRange.LENGTH_UNSET
     private var bytesRemaining: Long = 0
     private var responseHeaders: Map<String, List<String>> = emptyMap()
 
@@ -141,9 +144,9 @@ class RangeDataSource : DataSource {
         // 응답 헤더에서 실제 전체 길이를 다시 확인
         val range = conn.getHeaderField("Content-Range")
         val realTotal = range?.substringAfterLast("/")?.toLongOrNull()
-        if (realTotal != null && realTotal > 0) totalLength = realTotal else totalLength = total
+        totalLength = if (realTotal != null && realTotal > 0) realTotal else total
 
-        bytesRemaining = if (dataSpec.length != DataSpec.LENGTH_UNSET) {
+        bytesRemaining = if (dataSpec.length != StreamRange.LENGTH_UNSET) {
             dataSpec.length
         } else {
             val contentLen = conn.contentLengthLong
