@@ -78,3 +78,17 @@ jobs:
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="v$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*versionName = "([^"]+)".*/\1/')"
+          echo "TAG=$TAG"
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --title "무한 음악 플레이어 $TAG" \
+              --notes "안드로이드 네이티브(Kotlin + ExoPlayer) 버전. 차량 블루투스 지원."
+          fi
+          gh release upload "$TAG" app/build/outputs/apk/release/app-release.apk --clobber
+          echo "released $TAG"

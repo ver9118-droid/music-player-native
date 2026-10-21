@@ -1,5 +1,8 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
+> **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
+> `무한 음악 플레이어 v2.0.0.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
 
