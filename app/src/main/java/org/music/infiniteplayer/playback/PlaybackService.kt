@@ -114,6 +114,12 @@ class PlaybackService : MediaSessionService() {
         volume = Prefs.volume
 
         val exo = ExoPlayer.Builder(this)
+            // 유튜브 서버는 열린 범위("bytes=0-") 요청에 403 을 주므로
+            // 닫힌 Range 를 보내는 커스텀 DataSource 를 사용한다.
+            .setMediaSourceFactory(
+                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this)
+                    .setDataSourceFactory(org.music.infiniteplayer.core.RangeDataSource.Factory())
+            )
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -343,12 +349,18 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private suspend fun resolveEntry(entry: Entry, prefer: List<Int>? = null): ResolvedAudio? {
+    private suspend fun resolveEntry(
+        entry: Entry,
+        prefer: List<Int>? = null,
+        useCache: Boolean = true,
+    ): ResolvedAudio? {
         entry.audio?.let { return it }
-        audioCache[entry.track.id]?.let {
-            entry.audio = it
-            entry.thumb = Images.thumbFile(it.thumbUrl)
-            return it
+        if (useCache) {
+            audioCache[entry.track.id]?.let {
+                entry.audio = it
+                entry.thumb = Images.thumbFile(it.thumbUrl)
+                return it
+            }
         }
         entry.job?.let { existing ->
             return try {
@@ -731,7 +743,8 @@ class PlaybackService : MediaSessionService() {
             entry.job = null
             entry.audio = null
             entry.localFile = null
-            val audio = resolveEntry(entry, prefer)
+            // 캐시를 쓰지 않는다 (그래야 진짜로 새 주소를 받는다)
+            val audio = resolveEntry(entry, prefer, useCache = false)
             if (audio == null) {
                 errorText = "재생 오류 ($desc) · 스트림을 얻지 못했습니다"
                 publish()
@@ -832,7 +845,7 @@ class PlaybackService : MediaSessionService() {
             try {
                 val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection)
                 conn.requestMethod = "GET"
-                conn.setRequestProperty("Range", "bytes=0-1023")
+                conn.setRequestProperty("Range", "bytes=0-0")
                 conn.connectTimeout = 8000
                 conn.readTimeout = 8000
                 conn.instanceFollowRedirects = true

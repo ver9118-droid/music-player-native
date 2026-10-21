@@ -1,16 +1,22 @@
 package org.music.infiniteplayer.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import org.music.infiniteplayer.core.Prefs
 import org.music.infiniteplayer.data.ChartRepository
 import org.music.infiniteplayer.data.Sources
@@ -40,6 +46,13 @@ fun RootScreen() {
     var quality by remember { mutableStateOf(Prefs.quality) }
     var favorites by remember { mutableStateOf(loadFavorites()) }
 
+    // ── 통합 검색 ────────────────────────────────────────────
+    var searchQuery by remember { mutableStateOf("") }
+    var searchActive by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<Track>>(emptyList()) }
+
+    val scope = rememberCoroutineScope()
     val repo = remember { ChartRepository(YoutubeRepository()) }
     val currentSource by rememberUpdatedState(sourceKey)
 
@@ -66,78 +79,131 @@ fun RootScreen() {
 
     BackHandler(enabled = page != PAGE_HOME) { page = PAGE_HOME }
 
-    when (page) {
-        PAGE_PLAYER -> NowPlayingScreen(
-            state = state,
-            isFavorite = favorites.any { it.id == currentTrackId(state, tracks) },
-            onToggleFavorite = {
-                val id = currentTrackId(state, tracks)
-                val track = tracks.firstOrNull { it.id == id }
-                if (track != null) {
+    // 상태바/네비게이션바 영역과 겹치지 않도록 inset 적용
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg)
+            .systemBarsPadding()
+    ) {
+        when (page) {
+            PAGE_PLAYER -> NowPlayingScreen(
+                state = state,
+                isFavorite = favorites.any { it.id == currentTrackId(state, tracks) },
+                onToggleFavorite = {
+                    val id = currentTrackId(state, tracks)
+                    val track = tracks.firstOrNull { it.id == id }
+                    if (track != null) {
+                        Prefs.toggleFavoriteTrack(track.toJson())
+                        favorites = loadFavorites()
+                    }
+                },
+                onRetry = { PlayerBus.post { it.retryCurrent() } },
+                onDownload = { PlayerBus.post { it.downloadAndPlay() } },
+                onRaiseVolume = { PlayerBus.post { it.raiseSystemVolume() } },
+                onBack = { page = PAGE_HOME },
+                onTogglePlay = { PlayerBus.post { it.toggle() } },
+                onNext = { PlayerBus.post { it.next() } },
+                onPrev = { PlayerBus.post { it.prev() } },
+                onSeek = { ms -> PlayerBus.post { it.seekTo(ms) } },
+                onVolume = { v -> PlayerBus.post { it.setVolume(v) } },
+                onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
+                onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
+                onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
+            )
+
+            PAGE_SETTINGS -> SettingsScreen(
+                state = state,
+                quality = quality,
+                favorites = favorites,
+                onBack = { page = PAGE_HOME },
+                onOpenDiagnostics = { page = PAGE_DIAG },
+                onVolume = { v -> PlayerBus.post { it.setVolume(v) } },
+                onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
+                onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
+                onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
+                onQuality = { q ->
+                    quality = q
+                    Prefs.quality = q
+                },
+                onRemoveFavorite = { track ->
                     Prefs.toggleFavoriteTrack(track.toJson())
                     favorites = loadFavorites()
-                }
-            },
-            onRetry = { PlayerBus.post { it.retryCurrent() } },
-            onDownload = { PlayerBus.post { it.downloadAndPlay() } },
-            onRaiseVolume = { PlayerBus.post { it.raiseSystemVolume() } },
-            onBack = { page = PAGE_HOME },
-            onTogglePlay = { PlayerBus.post { it.toggle() } },
-            onNext = { PlayerBus.post { it.next() } },
-            onPrev = { PlayerBus.post { it.prev() } },
-            onSeek = { ms -> PlayerBus.post { it.seekTo(ms) } },
-            onVolume = { v -> PlayerBus.post { it.setVolume(v) } },
-            onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
-            onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
-            onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
-        )
+                },
+                onPlayFavorite = { track ->
+                    PlayerBus.post { it.setQueue(listOf(track), 0) }
+                    page = PAGE_PLAYER
+                },
+            )
 
-        PAGE_SETTINGS -> SettingsScreen(
-            state = state,
-            quality = quality,
-            favorites = favorites,
-            onBack = { page = PAGE_HOME },
-            onOpenDiagnostics = { page = PAGE_DIAG },
-            onVolume = { v -> PlayerBus.post { it.setVolume(v) } },
-            onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
-            onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
-            onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
-            onQuality = { q ->
-                quality = q
-                Prefs.quality = q
-            },
-            onRemoveFavorite = { track ->
-                Prefs.toggleFavoriteTrack(track.toJson())
-                favorites = loadFavorites()
-            },
-            onPlayFavorite = { track ->
-                PlayerBus.post { it.setQueue(listOf(track), 0) }
-                page = PAGE_PLAYER
-            },
-        )
+            PAGE_DIAG -> DiagnosticsScreen(
+                state = state,
+                onBack = { page = PAGE_SETTINGS },
+                onRetry = { PlayerBus.post { it.retryCurrent() } },
+                onDownload = { PlayerBus.post { it.downloadAndPlay() } },
+            )
 
-        PAGE_DIAG -> DiagnosticsScreen(
-            state = state,
-            onBack = { page = PAGE_SETTINGS },
-            onRetry = { PlayerBus.post { it.retryCurrent() } },
-            onDownload = { PlayerBus.post { it.downloadAndPlay() } },
-        )
-
-        else -> HomeScreen(
-            tracks = tracks,
-            state = state,
-            sourceKey = sourceKey,
-            loading = loading,
-            message = message,
-            onSelectSource = { key -> sourceKey = key },
-            onTrackClick = { index ->
-                val list = tracks
-                PlayerBus.post { it.setQueue(list, index) }
-            },
-            onOpenPlayer = { page = PAGE_PLAYER },
-            onOpenSettings = { page = PAGE_SETTINGS },
-            onRetry = { PlayerBus.post { it.retryCurrent() } },
-        )
+            else -> {
+                val shown = if (searchActive) searchResults else tracks
+                HomeScreen(
+                    tracks = shown,
+                    state = state,
+                    sourceKey = sourceKey,
+                    loading = loading,
+                    message = message,
+                    searchQuery = searchQuery,
+                    searchActive = searchActive,
+                    searching = searching,
+                    onQueryChange = { q ->
+                        searchQuery = q
+                        if (q.isBlank()) {
+                            searchActive = false
+                            searchResults = emptyList()
+                        }
+                    },
+                    onSearchSubmit = {
+                        val q = searchQuery.trim()
+                        if (q.isEmpty()) return@HomeScreen
+                        scope.launch {
+                            searching = true
+                            searchActive = true
+                            message = ""
+                            try {
+                                val yt = repo.searchMusic(q, 40)
+                                val chart = tracks.filter {
+                                    it.title.contains(q, true) || it.artist.contains(q, true)
+                                }
+                                val merged = chart + yt.filter { y ->
+                                    chart.none { it.title.equals(y.title, true) }
+                                }
+                                searchResults = merged
+                            } catch (e: Exception) {
+                                message = "검색에 실패했습니다: ${e.message ?: ""}"
+                            }
+                            searching = false
+                        }
+                    },
+                    onClearSearch = {
+                        searchQuery = ""
+                        searchActive = false
+                        searchResults = emptyList()
+                    },
+                    onSelectSource = { key ->
+                        searchActive = false
+                        searchQuery = ""
+                        searchResults = emptyList()
+                        sourceKey = key
+                    },
+                    onTrackClick = { index ->
+                        val list = shown
+                        PlayerBus.post { it.setQueue(list, index) }
+                    },
+                    onOpenPlayer = { page = PAGE_PLAYER },
+                    onOpenSettings = { page = PAGE_SETTINGS },
+                    onRetry = { PlayerBus.post { it.retryCurrent() } },
+                )
+            }
+        }
     }
 }
 

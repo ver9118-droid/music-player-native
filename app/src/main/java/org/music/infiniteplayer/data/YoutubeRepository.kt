@@ -43,6 +43,26 @@ class YoutubeRepository(var quality: String = "high") {
         parseSearch(json, limit)
     }
 
+    /**
+     * 음악만 골라서 검색한다. (노래 관련 영상만)
+     *  - 먹방/게임/브이로그 같은 일반 영상은 제외
+     *  - 오피ICIAL/뮤직비디오/공연/노래방 같은 음악 영상은 포함
+     */
+    suspend fun searchMusic(query: String, limit: Int = 40): List<Track> = withContext(Dispatchers.IO) {
+        val all = search(query, limit + 30)
+        all.filter { isMusic(it) }.take(limit)
+    }
+
+    private fun isMusic(t: Track): Boolean {
+        val low = t.title.lowercase()
+        for (w in NON_MUSIC_WORDS) if (low.contains(w)) return false
+        if (MV_RE.containsMatchIn(t.title)) return true
+        for (w in MUSIC_WORDS) if (low.contains(w)) return true
+        // 길이 기준 : 1분 ~ 15분이면 대부분 음악
+        val d = t.durationMs
+        return d in 60_000..(15 * 60_000)
+    }
+
     /** 차트 곡 → 실제 재생 가능한 오디오 URL. */
     suspend fun resolve(track: Track, preferItags: List<Int>? = null): ResolvedAudio? =
         withContext(Dispatchers.IO) {
@@ -337,5 +357,29 @@ class YoutubeRepository(var quality: String = "high") {
             "remix", "nightcore", "practice", "연습", "8d", "concert", "공연",
         )
         val GOOD_WORDS = listOf("official", "mv", "m/v", "audio", "키WI", "정오fficial")
+
+        /** 일반 영상(먹방/게임/브이로그 등) 제외용 */
+        val NON_MUSIC_WORDS = listOf(
+            "먹방", "먹기", "mukbang", "asmr", "게임", "gameplay", "gaming", "공략",
+            "vlog", "브이로그", "개밥", "요리", "레시피", "뉴스", "news", "티저",
+            "예고편", "trailer", "리뷰", "review", "unboxing", "개봉", "트리포",
+            "tutorial", "강의", "경제", "주식", "코인", "루비", "betting", "베팅",
+            "대탈출", "드라마", "drama", "영화", "movie", "공포", "funny", "comedy",
+            "코미디", "리액션", "reaction", "walk", "macro", "drawing", "드로잉",
+            "일상", "루틴", "하루", "브이브이", "shorts", " shorts",
+        )
+
+        /** 음악 관련 키워드 */
+        val MUSIC_WORDS = listOf(
+            "official", "audio", "music", "song", "sing", "singalong", "m/v",
+            "키wi", "노래", "곡", "가사", "concert", "공연", "콘서트", "컴서트",
+            "festival", "live", "라이브", "ost", "오디션", "노래방", "karaoke",
+            "instrumental", "acoustic", "piano", "피아노", "guitar", "기타",
+            "remaster", "performance", "오케스트라", "뮤직", "music video",
+            "collab", "collabo", "ver.", "take", "cover", "커버",
+        )
+
+        /** "MV" 를 단어로만 recognition (movie 등 오검출 방지) */
+        val MV_RE = Regex("(^|[\\s\\[(])mv([\\s\\])\\-]|$)", RegexOption.IGNORE_CASE)
     }
 }

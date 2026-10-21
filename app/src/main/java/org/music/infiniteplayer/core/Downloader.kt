@@ -4,8 +4,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
  * 스트림 직접 재생이 실패했을 때의 대체 경로.
@@ -20,21 +18,16 @@ object Downloader {
         dest: File,
         onProgress: ((percent: Int) -> Unit)? = null,
     ): Boolean = withContext(Dispatchers.IO) {
-        var conn: HttpURLConnection? = null
+        var conn: java.net.HttpURLConnection? = null
         try {
-            conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 15_000
-                readTimeout = 30_000
-                instanceFollowRedirects = true
-                setRequestProperty("User-Agent", Net.UA_YT)
-                setRequestProperty("Accept", "*/*")
-            }
+            // 유튜브 서버는 Range 없는 요청/열린 범위를 403 으로 막는다.
+            // 반드시 닫힌 범위로 요청한다.
+            val (connection, total) = StreamRange.open(url, 0, androidx.media3.common.C.LENGTH_UNSET)
+            conn = connection
             val code = conn.responseCode
             if (code !in 200..299) {
                 throw IOException("HTTP $code")
             }
-            val total = conn.contentLengthLong
             dest.parentFile?.mkdirs()
             var done = 0L
             var lastPercent = -1

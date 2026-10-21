@@ -21,6 +21,10 @@ class ChartRepository(private val youtube: YoutubeRepository) {
         }
     }
 
+    /** 통합 검색 : 음악 영상만 골라서 검색 */
+    suspend fun searchMusic(query: String, limit: Int = 40): List<Track> =
+        youtube.searchMusic(query, limit)
+
     // ── 멜론 ──────────────────────────────────────────────────
     private fun parseMelon(html: String): List<Track> {
         val tracks = ArrayList<Track>(60)

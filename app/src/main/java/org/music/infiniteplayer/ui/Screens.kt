@@ -20,9 +20,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -32,12 +37,14 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.VolumeDown
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,9 +62,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -83,6 +93,12 @@ fun HomeScreen(
     sourceKey: String,
     loading: Boolean,
     message: String,
+    searchQuery: String,
+    searchActive: Boolean,
+    searching: Boolean,
+    onQueryChange: (String) -> Unit,
+    onSearchSubmit: () -> Unit,
+    onClearSearch: () -> Unit,
     onSelectSource: (String) -> Unit,
     onTrackClick: (Int) -> Unit,
     onOpenPlayer: () -> Unit,
@@ -98,13 +114,23 @@ fun HomeScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 18.dp, end = 8.dp, top = 14.dp, bottom = 4.dp),
+                .padding(start = 18.dp, end = 8.dp, top = 10.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("무한 음악 플레이어", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
                 Text(
-                    text = if (loading) "차트 불러오는 중..." else "${tracks.size}곡",
+                    text = "무한 음악 플레이어",
+                    style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = when {
+                        searching -> "검색 중..."
+                        searchActive -> "검색 결과 ${tracks.size}곡"
+                        loading -> "차트 불러오는 중..."
+                        else -> "${tracks.size}곡"
+                    },
                     color = TextSecondary,
                     fontSize = 12.5.sp,
                 )
@@ -114,8 +140,37 @@ fun HomeScreen(
             }
         }
 
-        // 소스 선택
-        SourceChips(sourceKey = sourceKey, onSelect = onSelectSource)
+        // 검색창 (통합검색 : 노래관련 영상만)
+        SearchField(
+            query = searchQuery,
+            searching = searching,
+            onQueryChange = onQueryChange,
+            onSubmit = onSearchSubmit,
+        )
+
+        // 소스 선택 (검색 중에는 숨김)
+        if (!searchActive) {
+            SourceChips(sourceKey = sourceKey, onSelect = onSelectSource)
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusChip("검색: $searchQuery", Accent)
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Surface2)
+                        .clickable(onClick = onClearSearch)
+                        .padding(horizontal = 11.dp, vertical = 5.dp),
+                ) {
+                    Text("차트 보기", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
 
         if (message.isNotBlank()) {
             Box(
@@ -190,9 +245,73 @@ fun HomeScreen(
     }
 }
 
+/** 통합 검색 입력창 */
 @Composable
-private fun SourceChips(sourceKey: String, onSelect: (String) -> Unit) {
-    val items = remember {
+private fun SearchField(
+    query: String,
+    searching: Boolean,
+    onQueryChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface1)
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Rounded.Search,
+            null,
+            tint = TextSecondary,
+            modifier = Modifier.size(19.dp),
+        )
+        Spacer(Modifier.width(9.dp))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) {
+                Text("곡 제목 · 가수명 검색", color = TextSecondary, fontSize = 14.sp)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
+                cursorBrush = SolidColor(Accent),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (searching) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = Accent,
+            )
+        } else if (query.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Surface2)
+                    .clickable { onQueryChange("") },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.Close,
+                    "지우기",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceChips(sourceKey: String, onSelect: (String) -> Unit) {    val items = remember {
         buildList {
             var lastGroup = ""
             Sources.all.forEach { src ->
@@ -843,23 +962,19 @@ fun SettingsScreen(
             }
 
             item {
-                SectionTitle("차량 블루투스")
+                SectionTitle("차량 블루투스 연결")
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
                     Text(
-                        "①安卓 설정 → 블루투스 → 차량 연결\n" +
-                                "②차량 오디오에서 '무한 음악 플레이어' 선택\n" +
-                                "③차량 스티어링휠/키패드로 재생·일시정지·곡 전환\n" +
-                                "④차량 화면에 곡명·앨범아트가 표시됩니다",
+                        "1. 휴대전화 설정에서 블루투스를 켭니다\n" +
+                                "2. 블루투스 화면에서 차량을 검색해 연결합니다\n" +
+                                "3. 차량 오디오 소스에서 '무한 음악 플레이어'를 선택합니다\n" +
+                                "4. 스티어링휠이나 키패드로 재생·일시정지·곡 전환이 됩니다\n" +
+                                "5. 차량 화면에 곡 정보와 앨범아트가 표시됩니다",
                         color = TextSecondary,
                         fontSize = 12.5.sp,
                         lineHeight = 19.sp,
                     )
                 }
-                SettingRow(
-                    title = "통화 중 자동 일시정지",
-                    subtitle = if (android.os.Build.VERSION.SDK_INT >= 31)
-                        "전화 상태 권한이 있으면 통화 시작 즉시 음악이 멈춥니다" else "오디오 포커스로 처리됩니다",
-                )
             }
 
             item {
