@@ -388,11 +388,12 @@ class PlaybackService : MediaSessionService() {
     private suspend fun fillOnce() {
         val p = player ?: return
         val gen = generation
-        // 뒤로 지나간 항목은 제거 (메모리 절약)
+        // 뒤로 지나간 항목은 제거하되, 직전 곡 1개는 남긴다
+        // (차량/알림의 "이전 곡" 버튼이 동작하도록)
         val curIdx = p.currentMediaItemIndex
-        if (curIdx > 0) {
-            p.removeMediaItems(0, curIdx)
-            windowStart += curIdx
+        if (curIdx > 1) {
+            p.removeMediaItems(0, curIdx - 1)
+            windowStart += curIdx - 1
         }
         var added = 0
         while (added < 2 && currentCoroutineContext().isActive) {

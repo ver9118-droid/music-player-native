@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,8 +39,9 @@ fun RootScreen() {
     var favorites by remember { mutableStateOf(loadFavorites()) }
 
     val repo = remember { ChartRepository(YoutubeRepository()) }
+    val currentSource by rememberUpdatedState(sourceKey)
 
-    // 차트 로드 : 캐시를 먼저Showing → 즉시 표시, 그다음 최신본으로 교체
+    // 차트 로드 : 캐시를 먼저 보여줘 즉시 표시 → 그다음 최신본으로 교체
     LaunchedEffect(sourceKey) {
         Prefs.lastSource = sourceKey
         loading = true
@@ -48,12 +50,16 @@ fun RootScreen() {
         tracks = if (cached.isNotEmpty()) decodeTracks(cached) else emptyList()
         try {
             val fresh = repo.load(Sources.byKey(sourceKey) ?: Sources.default)
-            tracks = fresh
-            Prefs.saveChart(sourceKey, encodeTracks(fresh))
+            if (currentSource == sourceKey) {
+                tracks = fresh
+                Prefs.saveChart(sourceKey, encodeTracks(fresh))
+            }
         } catch (e: Exception) {
-            message = e.message ?: "차트를 불러오지 못했습니다."
+            if (currentSource == sourceKey) {
+                message = e.message ?: "차트를 불러오지 못했습니다."
+            }
         }
-        loading = false
+        if (currentSource == sourceKey) loading = false
     }
 
     BackHandler(enabled = page != PAGE_HOME) { page = PAGE_HOME }
