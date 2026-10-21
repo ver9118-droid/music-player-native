@@ -49,10 +49,11 @@ fun Artwork(
     size: Dp,
     modifier: Modifier = Modifier,
     corner: Dp = 14.dp,
+    maxPx: Int = 320,
 ) {
     val bmp by produceState<Bitmap?>(null, url) {
         value = try {
-            if (url.isBlank()) null else Images.load(url, 640)
+            if (url.isBlank()) null else Images.load(url, maxPx)
         } catch (e: Exception) {
             // 이미지 로드 실패가 앱을 죽이지 않게
             org.music.infiniteplayer.core.CrashLog.save(e)

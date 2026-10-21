@@ -38,7 +38,8 @@ private const val PAGE_DIAG = 3
 @Composable
 fun RootScreen() {
     val state by PlayerBus.state.collectAsStateWithLifecycle()
-    val tick by PlayerBus.tick.collectAsStateWithLifecycle()
+    // 위치(tick)는 250ms 마다 갱신되므로 "지금 재생" 화면에서만 구독한다.
+    // (홈 화면에서 구독하면 목록 전체가 매 프레임 다시 그려져 느려진다)
     val diag by PlayerBus.diagnostics.collectAsStateWithLifecycle()
 
     var page by rememberSaveable { mutableIntStateOf(PAGE_HOME) }
@@ -122,7 +123,6 @@ fun RootScreen() {
         when (page) {
             PAGE_PLAYER -> NowPlayingScreen(
                 state = state,
-                tick = tick,
                 diag = diag,
                 isFavorite = favorites.any { it.id == currentTrackId(state, tracks) },
                 onToggleFavorite = {

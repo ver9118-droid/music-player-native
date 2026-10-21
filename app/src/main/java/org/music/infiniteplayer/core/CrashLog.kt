@@ -76,9 +76,21 @@ object CrashLog {
         }
     }
 
-    /** 예외를 로그 파일에 남긴다 */
-    fun save(error: Throwable) {
+    /** 텍스트를 로그 파일에 남긴다 (기존 내용 뒤에 덧붙임) */
+    fun saveText(text: String) {
         try {
+            val prev = try {
+                file?.takeIf { it.exists() }?.readText().orEmpty()
+            } catch (_: Exception) {
+                ""
+            }
+            save(prev + "\n\n" + text)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** 예외를 로그 파일에 남긴다 */
+    fun save(error: Throwable) {        try {
             val sw = StringWriter()
             PrintWriter(sw).use { error.printStackTrace(it) }
             save(

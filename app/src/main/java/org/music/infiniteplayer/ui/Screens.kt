@@ -77,6 +77,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.music.infiniteplayer.data.LyricLine
 import org.music.infiniteplayer.data.Source
 import org.music.infiniteplayer.data.Sources
@@ -459,7 +460,6 @@ private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit) {
 @Composable
 fun NowPlayingScreen(
     state: PlayerState,
-    tick: PlaybackTick,
     diag: Diagnostics,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
@@ -480,6 +480,9 @@ fun NowPlayingScreen(
     onMarkEnd: () -> Unit,
     onRingtone: () -> Unit,
 ) {
+    // 재생 위치는 이 화면에서만 구독 (홈 화면 재렌더링 방지)
+    val tick by org.music.infiniteplayer.playback.PlayerBus.tick
+        .collectAsStateWithLifecycle()
     var showLyrics by remember { mutableStateOf(false) }
 
     Column(
@@ -542,6 +545,7 @@ fun NowPlayingScreen(
                     url = state.thumbUrl,
                     size = 268.dp,
                     corner = 24.dp,
+                    maxPx = 720,
                 )
             }
         }
