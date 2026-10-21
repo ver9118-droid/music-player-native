@@ -27,13 +27,20 @@ jobs:
           gradle-version: '8.9'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
         run: |
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" || \
-          sdkmanager "platform-tools" "platforms;android-35"
-          yes | sdkmanager --licenses > /dev/null || true
+          set -e
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1 || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager 를 찾을 수 없습니다"
+            exit 1
+          fi
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" || \
+          "$SDKMANAGER" "platforms;android-35" || true
+          ls "$ANDROID_HOME/platforms" || true
+          ls "$ANDROID_HOME/build-tools" || true
 
       - name: Prepare signing keystore
         run: |
