@@ -811,6 +811,8 @@ fun DiagnosticsScreen(
                     DiagRow("주소 응답", diag.streamProbe.ifBlank { "-" })
                     DiagRow("시스템 볼륨", diag.systemVolume.ifBlank { "-" })
                     DiagRow("출력 경로", diag.audioRoute.ifBlank { "-" })
+                    DiagRow("서비스 상태", diag.serviceState.ifBlank { "-" })
+                    DiagRow("UI 응답", diag.uiLatency.ifBlank { "-" })
                     DiagRow("앱 볼륨", "%.0f%%".format(state.volume * 100))
                     DiagRow("오류", state.error.ifBlank { "없음" })
                     DiagRow("최근 크래시", if (crash.isBlank()) "없음" else "있음 (아래에서 복사)")

@@ -26,6 +26,8 @@ data class Diagnostics(
     val streamProbe: String = "",
     val systemVolume: String = "",
     val audioRoute: String = "",
+    val serviceState: String = "",
+    val uiLatency: String = "",
 )
 
 /** UI 가 보는 재생 상태 (曲目 정보/설정 등 자주 안 바뀌는 것들). */

@@ -3,6 +3,7 @@
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -598,8 +599,7 @@ class PlaybackService : MediaSessionService() {
         )
     }
 
-    /**
-     * 진단 정보 갱신.
+    /** 진단 정보 갱신.
      *
      * 플레이어 상태는 메인 스레드에서 읽고(ExoPlayer 제약),
      * AudioManager 조회는 IO 스레드에서 한다.
@@ -621,8 +621,47 @@ class PlaybackService : MediaSessionService() {
                     streamProbe = probe,
                     systemVolume = systemVolumeText(),
                     audioRoute = audioRouteText(),
+                    serviceState = serviceStateText(),
+                    uiLatency = uiLatencyText(),
                 )
             )
+        }
+    }
+
+    /** 서비스가 포그라운드로 살아있는지 (앱 일시정지/프로세스 동결 판별용) */
+    private fun serviceStateText(): String {
+        return try {
+            val am = getSystemService(android.content.Context.ACTIVITY_SERVICE)
+                    as android.app.ActivityManager
+            @Suppress("DEPRECATION")
+            val list = am.getRunningServices(100) ?: emptyList()
+            val svc = list.firstOrNull { it.service.packageName == packageName }
+            when {
+                svc == null -> "서비스 없음 (죽음)"
+                svc.foreground -> "포그라운드 실행 중"
+                svc.started -> "실행 중 (백그라운드)"
+                else -> "실행 중"
+            }
+        } catch (e: Exception) {
+            "확인 불가: ${e.javaClass.simpleName}"
+        }
+    }
+
+    /** UI 스레드(메인) 응답 속도 측정 */
+    private fun uiLatencyText(): String {
+        return try {
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val start = SystemClock.uptimeMillis()
+            handler.post { latch.countDown() }
+            val ms = if (latch.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                (SystemClock.uptimeMillis() - start).toString()
+            } else {
+                "5초 초과 (멈춤)"
+            }
+            "$ms ms"
+        } catch (e: Exception) {
+            "확인 불가"
         }
     }
 

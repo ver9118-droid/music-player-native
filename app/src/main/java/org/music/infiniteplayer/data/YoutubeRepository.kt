@@ -63,26 +63,45 @@ class YoutubeRepository(var quality: String = "high") {
         return d in 60_000..(15 * 60_000)
     }
 
-    /** 차트 곡 → 실제 재생 가능한 오디오 URL. */
+    /**
+     * 차트 곡 → 실제 재생 가능한 오디오 URL.
+     *
+     * 검색 상위 후보를 차례로 시도한다. (어떤 영상은 오디오 스트림이 없거나
+     *  지역 제한으로 막혀 있을 수 있다 → 다음 후보로 넘어간다)
+     */
     suspend fun resolve(track: Track, preferItags: List<Int>? = null): ResolvedAudio? =
         withContext(Dispatchers.IO) {
-            var videoId = track.videoId
-            var title = track.title
-            var artist = track.artist
-            var thumb = track.thumbUrl
-            var duration = track.durationMs
-
-            if (videoId.isBlank()) {
-                val results = search(buildQuery(track), 10)
-                val best = pickBest(results, track) ?: return@withContext null
-                videoId = best.videoId
-                title = best.title
-                artist = best.artist
-                thumb = best.thumbUrl
-                duration = best.durationMs
+            val candidates = if (track.videoId.isNotBlank()) {
+                listOf(track)
+            } else {
+                searchCandidates(track)
             }
-            resolveVideo(videoId, title, artist, thumb, duration, preferItags)
+            if (candidates.isEmpty()) return@withContext null
+            for (candidate in candidates) {
+                val audio = resolveVideo(
+                    candidate.videoId,
+                    candidate.title,
+                    candidate.artist,
+                    candidate.thumbUrl,
+                    candidate.durationMs,
+                    preferItags,
+                )
+                if (audio != null) return@withContext audio
+            }
+            null
         }
+
+    /** 검색 결과 중 점수 높은 순으로 상위 후보 (최대 4개) */
+    private suspend fun searchCandidates(track: Track): List<Track> {
+        val results = search(buildQuery(track), 12)
+        if (results.isEmpty()) return emptyList()
+        val scored = results.map { it to score(track.title, track.artist, it) }
+            .sortedByDescending { it.second }
+        val best = scored.first().second
+        // 점수가 너무 낮으면(다른 곡) 후보를 넓히지 않는다
+        val limit = if (best >= 2) 4 else 2
+        return scored.take(limit).map { it.first }
+    }
 
     private suspend fun resolveVideo(
         videoId: String,
