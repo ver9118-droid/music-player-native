@@ -52,6 +52,8 @@ data class PlayerState(
     val highlightEndMs: Long = -1,        // 하이라이트 끝점 (B)
     val sectionStartMs: Long = -1,        // 반복 재생 구간 시작
     val sectionEndMs: Long = -1,          // 반복 재생 구간 끝
+    val toast: String = "",               // 사용자에게 보여줄 메시지
+    val toastId: Long = 0L,               // 같은 메시지도 반복 표시되도록 증가
 )
 
 /**

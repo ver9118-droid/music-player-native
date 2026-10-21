@@ -21,11 +21,18 @@ object CrashLog {
     @Volatile
     private var externalFile: File? = null
 
+    @Volatile
+    private var stackFile: File? = null
+
+    @Volatile
+    private var externalStackFile: File? = null
+
     fun install(context: Context) {
         try {
             val dir = File(context.filesDir, "logs")
             dir.mkdirs()
             file = File(dir, "crash.txt")
+            stackFile = File(dir, "main_stack.txt")
         } catch (_: Exception) {
         }
         try {
@@ -34,6 +41,7 @@ object CrashLog {
             if (ext != null) {
                 ext.mkdirs()
                 externalFile = File(ext, "crash.txt")
+                externalStackFile = File(ext, "main_stack.txt")
             }
         } catch (_: Exception) {
         }
@@ -107,6 +115,26 @@ object CrashLog {
     fun read(): String {
         return try {
             file?.takeIf { it.exists() && it.length() > 0 }?.readText().orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    /** 메인 스레드 스택 덤프 저장 (덮어쓰기) */
+    fun saveStack(text: String) {
+        try {
+            stackFile?.writeText(text)
+        } catch (_: Exception) {
+        }
+        try {
+            externalStackFile?.writeText(text)
+        } catch (_: Exception) {
+        }
+    }
+
+    fun readStack(): String {
+        return try {
+            stackFile?.takeIf { it.exists() && it.length() > 0 }?.readText().orEmpty()
         } catch (_: Exception) {
             ""
         }

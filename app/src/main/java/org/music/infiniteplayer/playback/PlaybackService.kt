@@ -105,6 +105,8 @@ class PlaybackService : MediaSessionService() {
     private var downloadProgress = -1
     private var preparing = false
     private var lastState = PlayerState()
+    private var toastText = ""
+    private var toastId = 0L
 
     // ── 하이라이트 / 구간 반복 ────────────────────────────────
     private var highlightStartMs = -1L
@@ -579,6 +581,8 @@ class PlaybackService : MediaSessionService() {
             highlightEndMs = highlightEndMs,
             sectionStartMs = sectionStartMs,
             sectionEndMs = sectionEndMs,
+            toast = toastText,
+            toastId = toastId,
         )
         // 실제로 바뀔 때만 알린다 (홈 화면 불필요한 재생성 방지)
         if (next != lastState) {
@@ -637,6 +641,11 @@ class PlaybackService : MediaSessionService() {
 
     /** ExoPlayer 의 실제 상태를 그대로 보여준다 (버퍼링/오류를 '재생 중'으로 덮지 않는다) */
     private fun refreshStatus() {
+        // 진행 중 안내(다운로드/자르기 등)는 자동 상태에 덮어쓰지 않는다
+        if (manualStatus.isNotBlank()) {
+            statusText = manualStatus
+            return
+        }
         val p = player
         statusText = when {
             callPaused -> "통화 중"
@@ -649,6 +658,25 @@ class PlaybackService : MediaSessionService() {
             p.playbackState == Player.STATE_IDLE -> "대기 중"
             else -> "대기 중"
         }
+    }
+
+    /** 잠깐 동안 표시할 상태 (다운로드/구간자르기 등) */
+    private var manualStatusText = ""
+
+    private fun setManualStatus(text: String) {
+        manualStatusText = text
+        publish()
+    }
+
+    private fun clearManualStatus() {
+        manualStatusText = ""
+    }
+
+    /** 사용자에게 보여줄 토스트 메시지 */
+    private fun toast(text: String) {
+        toastText = text
+        toastId++
+        publish()
     }
 
     private fun playerStateName(state: Int?): String = when (state) {
@@ -864,17 +892,22 @@ class PlaybackService : MediaSessionService() {
 
     /** 현재 곡을 기기(음악 라이브러리)에 저장 */
     fun downloadToDevice() {
-        val entry = currentEntry ?: return
+        val entry = currentEntry
+        if (entry == null) {
+            toast("재생 중인 곡이 없습니다")
+            return
+        }
         scope.launch {
             val dest = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
             downloadProgress = 0
-            statusText = "내려받는 중..."
-            publish()
+            setManualStatus("내려받는 중...")
             // 주소는 IP 로 서명되어 있어 모바일 환경에서 오래되면 403 이 된다.
             // → 실패하면 새 주소로 받아 즉시 한 번 더 시도한다.
             var audio = resolveForFile(entry)
             if (audio == null) {
                 errorText = "스트림 주소를 얻지 못했습니다"
+                clearManualStatus()
+                toast("다운로드 실패: 스트림 주소를 얻지 못했습니다")
                 publish()
                 return@launch
             }
@@ -897,7 +930,8 @@ class PlaybackService : MediaSessionService() {
             val useAudio = audio
             if (!res.ok || useAudio == null) {
                 errorText = "다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
-                statusText = "다운로드 실패"
+                clearManualStatus()
+                toast("다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
                 publish()
                 return@launch
             }
@@ -907,23 +941,31 @@ class PlaybackService : MediaSessionService() {
             )
             if (saved.uri == null) {
                 errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
-                statusText = "저장 실패"
+                clearManualStatus()
+                toast("저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
                 publish()
                 return@launch
             }
             errorText = ""
-            statusText = "다운로드 완료 · $name"
+            setManualStatus("다운로드 완료")
+            toast("다운로드 완료 · $name")
             publish()
         }
     }
 
     /** 벨소리로 설정 (하이라이트가 지정되어 있으면 그 구간만 사용) */
     fun setAsRingtone() {
-        val entry = currentEntry ?: return
+        val entry = currentEntry
+        if (entry == null) {
+            toast("재생 중인 곡이 없습니다")
+            return
+        }
         scope.launch {
             val audio = resolveForFile(entry)
             if (audio == null) {
                 errorText = "스트림을 얻지 못했습니다"
+                clearManualStatus()
+                toast("벨소리 실패: 스트림을 얻지 못했습니다")
                 publish()
                 return@launch
             }
@@ -931,11 +973,12 @@ class PlaybackService : MediaSessionService() {
             var useAudio = audio
             if (!src.exists() || src.length() < 1024) {
                 downloadProgress = 0
-                statusText = "음원 준비 중..."
-                publish()
+                setManualStatus("음원 준비 중...")
                 var audio2 = resolveForFile(entry)
                 if (audio2 == null) {
                     errorText = "스트림 주소를 얻지 못했습니다"
+                    clearManualStatus()
+                    toast("벨소리 실패: 스트림 주소를 얻지 못했습니다")
                     publish()
                     return@launch
                 }
@@ -957,7 +1000,8 @@ class PlaybackService : MediaSessionService() {
                 downloadProgress = -1
                 if (!res.ok || audio2 == null) {
                     errorText = "다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
-                    statusText = "다운로드 실패"
+                    clearManualStatus()
+                    toast("벨소리 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
                     publish()
                     return@launch
                 }
@@ -967,27 +1011,29 @@ class PlaybackService : MediaSessionService() {
             val name = safeFileName(entry.track, useAudio.mimeType)
             if (highlightStartMs >= 0 && highlightEndMs > highlightStartMs) {
                 val clipped = File(cacheDir, "ring_${entry.track.id.hashCode()}.m4a")
-                statusText = "구간 자르는 중..."
-                publish()
+                setManualStatus("구간 자르는 중...")
                 // 무거운 작업은 반드시 IO 스레드에서 (메인 스레드 차단 방지)
                 val trimmed = withContext(Dispatchers.IO) {
                     org.music.infiniteplayer.core.ClipMaker.trim(
-                        src, highlightStartMs, highlightEndMs, clipped, audio.mimeType
+                        src, highlightStartMs, highlightEndMs, clipped, useAudio.mimeType
                     )
                 }
                 if (!trimmed) {
                     errorText = "구간 자르기에 실패했습니다"
+                    clearManualStatus()
+                    toast("벨소리 실패: 구간 자르기에 실패했습니다")
                     publish()
                     return@launch
                 }
                 file = clipped
             }
             val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
-                this@PlaybackService, file, name, audio.mimeType,
+                this@PlaybackService, file, name, useAudio.mimeType,
             )
             if (saved.uri == null) {
                 errorText = "벨소리 저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
-                statusText = "저장 실패"
+                clearManualStatus()
+                toast("벨소리 저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
                 publish()
                 return@launch
             }
@@ -995,7 +1041,8 @@ class PlaybackService : MediaSessionService() {
                 org.music.infiniteplayer.core.RingtoneSetter.setRingtone(this@PlaybackService, saved.uri)
             }
             errorText = ""
-            statusText = if (ok) "벨소리로 설정했습니다" else "벨소리로 저장했습니다 (설정에서 선택)"
+            setManualStatus(if (ok) "벨소리로 설정했습니다" else "벨소리로 저장했습니다 (설정에서 선택)")
+            toast(if (ok) "벨소리로 설정했습니다" else "벨소리 파일은 저장했습니다. 설정 → 소리 → 벨소리에서 선택하세요")
             publish()
         }
     }

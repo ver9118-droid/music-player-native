@@ -105,6 +105,7 @@ fun HomeScreen(
     searchActive: Boolean,
     searching: Boolean,
     crashLog: String,
+    freezeDetected: Boolean,
     onOpenDiagnostics: () -> Unit,
     onQueryChange: (String) -> Unit,
     onSearchSubmit: () -> Unit,
@@ -151,7 +152,7 @@ fun HomeScreen(
         }
 
         // 직전 실행에서 발생한 오류 안내
-        if (crashLog.isNotBlank()) {
+        if (crashLog.isNotBlank() || freezeDetected) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -162,7 +163,8 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "지난 실행에서 오류가 발생했습니다",
+                    text = if (freezeDetected)
+                        "지난 실행에서 앱이 멈췄습니다 (진단 가능)" else "지난 실행에서 오류가 발생했습니다",
                     color = Danger,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -768,6 +770,7 @@ fun DiagnosticsScreen(
 ) {
     val clipboard = LocalClipboardManager.current
     val crash = remember { org.music.infiniteplayer.core.CrashLog.read() }
+    val stackDump = remember { org.music.infiniteplayer.core.CrashLog.readStack() }
     val report = remember(state, diag) {
         buildString {
             appendLine("무한 음악 플레이어 진단")
@@ -811,6 +814,7 @@ fun DiagnosticsScreen(
                     DiagRow("앱 볼륨", "%.0f%%".format(state.volume * 100))
                     DiagRow("오류", state.error.ifBlank { "없음" })
                     DiagRow("최근 크래시", if (crash.isBlank()) "없음" else "있음 (아래에서 복사)")
+                    DiagRow("스택 덤프", if (stackDump.isBlank()) "없음" else "있음 (아래에서 복사)")
                     if (state.downloadProgress >= 0) {
                         DiagRow("다운로드", "${state.downloadProgress}%")
                     }
@@ -835,6 +839,18 @@ fun DiagnosticsScreen(
                         Text(
                             "최근 크래시 로그입니다. 복사해서 개발자에게 보내주세요.",
                             color = Danger,
+                            fontSize = 11.5.sp,
+                        )
+                    }
+                    if (stackDump.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        ActionButton("메인 스레드 스택 복사", Surface2, TextPrimary) {
+                            clipboard.setText(AnnotatedString(stackDump))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "앱이 멈췄을 때 메인 스레드가 뭘 하고 있었는지 기록된 것입니다.",
+                            color = TextSecondary,
                             fontSize = 11.5.sp,
                         )
                     }

@@ -52,6 +52,10 @@ fun RootScreen() {
     var quality by remember { mutableStateOf(Prefs.quality) }
     var favorites by remember { mutableStateOf(loadFavorites()) }
     var crashLog by remember { mutableStateOf(org.music.infiniteplayer.core.CrashLog.read()) }
+    // 지난 실행에서 멈춤이 감지됐는지 (감시자 기록)
+    var freezeDetected by remember {
+        mutableStateOf(org.music.infiniteplayer.core.CrashLog.readStack().contains("멈춤 감지"))
+    }
 
     // ── 통합 검색 ────────────────────────────────────────────
     var searchQuery by remember { mutableStateOf("") }
@@ -95,6 +99,16 @@ fun RootScreen() {
     }
 
     BackHandler(enabled = page != PAGE_HOME) { page = PAGE_HOME }
+
+    // 서비스에서 온 알림(다운로드/벨소리 결과)을 토스트로 표시
+    val toastContext = LocalContext.current
+    LaunchedEffect(state.toastId) {
+        if (state.toastId > 0L && state.toast.isNotBlank()) {
+            android.widget.Toast.makeText(
+                toastContext, state.toast, android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
 
     // 안전망 : 서비스가 죽었는데 UI 가 살아 있으면 다시 살린다
     val appContext = LocalContext.current
@@ -195,6 +209,7 @@ fun RootScreen() {
                     searchActive = searchActive,
                     searching = searching,
                     crashLog = crashLog,
+                    freezeDetected = freezeDetected,
                     onOpenDiagnostics = { page = PAGE_DIAG },
                     onQueryChange = { q ->
                         searchQuery = q
