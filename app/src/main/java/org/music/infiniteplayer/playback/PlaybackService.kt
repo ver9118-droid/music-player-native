@@ -109,9 +109,7 @@ class PlaybackService : MediaSessionService() {
     private var toastText = ""
     private var toastId = 0L
 
-    // ── 하이라이트 / 구간 반복 ────────────────────────────────
-    private var highlightStartMs = -1L
-    private var highlightEndMs = -1L
+    // ── 구간 반복 ───────────────────────────────────────────────
     private var sectionStartMs = -1L
     private var sectionEndMs = -1L
 
@@ -650,8 +648,6 @@ class PlaybackService : MediaSessionService() {
             lyrics = lyrics,
             callActive = callPaused,
             downloadProgress = downloadProgress,
-            highlightStartMs = highlightStartMs,
-            highlightEndMs = highlightEndMs,
             sectionStartMs = sectionStartMs,
             sectionEndMs = sectionEndMs,
             toast = toastText,
@@ -936,42 +932,8 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    // ── 하이라이트 / 구간 반복 ─────────────────────────────────
-    /** 현재 위치를 하이라이트 시작점(A)으로 지정 */
-    fun markHighlightStart() {
-        val pos = player?.currentPosition ?: return
-        highlightStartMs = pos
-        if (highlightEndMs in 0 until pos) highlightEndMs = -1L
-        sectionStartMs = -1L
-        sectionEndMs = -1L
-        statusText = "하이라이트 시작 ${formatTime(pos)}"
-        publish()
-    }
-
-    /** 현재 위치를 하이라이트 끝점(B)으로 지정 */
-    fun markHighlightEnd() {
-        val pos = player?.currentPosition ?: return
-        if (highlightStartMs < 0) {
-            markHighlightStart()
-            return
-        }
-        if (pos <= highlightStartMs) {
-            highlightEndMs = -1L
-            statusText = "시작점보다 뒤에서 지정하세요"
-        } else {
-            highlightEndMs = pos
-            statusText = "하이라이트 ${formatTime(highlightStartMs)} ~ ${formatTime(pos)}"
-        }
-        publish()
-    }
-
-    fun clearHighlight() {
-        highlightStartMs = -1L
-        highlightEndMs = -1L
-        publish()
-    }
-
-    /** 지정 구간만 반복 재생 (전반부/후반부/하이라이트) */
+    // ── 구간 반복 ───────────────────────────────────────────────
+    /** 지정 구간만 반복 재생 (전반부/후반부) */
     fun playSection(startMs: Long, endMs: Long) {
         val p = player ?: return
         if (endMs <= startMs) return
@@ -1064,7 +1026,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    /** 벨소리로 설정 (하이라이트가 지정되어 있으면 그 구간만 사용) */
+    /** 벨소리로 설정 (곡 전체를 벨소리로 지정) */
     fun setAsRingtone() {
         val entry = currentEntry
         if (entry == null) {
@@ -1118,28 +1080,9 @@ class PlaybackService : MediaSessionService() {
                 }
                 useAudio = audio2
             }
-            var file = src
             val name = safeFileName(entry.track, useAudio.mimeType)
-            if (highlightStartMs >= 0 && highlightEndMs > highlightStartMs) {
-                val clipped = File(cacheDir, "ring_${entry.track.id.hashCode()}.m4a")
-                setManualStatus("구간 자르는 중...")
-                // 무거운 작업은 반드시 IO 스레드에서 (메인 스레드 차단 방지)
-                val trimmed = withContext(Dispatchers.IO) {
-                    org.music.infiniteplayer.core.ClipMaker.trim(
-                        src, highlightStartMs, highlightEndMs, clipped, useAudio.mimeType
-                    )
-                }
-                if (!trimmed) {
-                    errorText = "구간 자르기에 실패했습니다"
-                    clearManualStatus()
-                    toast("벨소리 실패: 구간 자르기에 실패했습니다")
-                    publish()
-                    return@launch
-                }
-                file = clipped
-            }
             val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
-                this@PlaybackService, file, name, useAudio.mimeType,
+                this@PlaybackService, src, name, useAudio.mimeType,
             )
             if (saved.uri == null) {
                 errorText = "벨소리 저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"

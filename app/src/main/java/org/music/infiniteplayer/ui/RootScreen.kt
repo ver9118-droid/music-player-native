@@ -160,9 +160,6 @@ fun RootScreen() {
                 onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
                 onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
                 onSection = { s, e -> PlayerBus.post { it.playSection(s, e) } },
-                onMarkStart = { PlayerBus.post { it.markHighlightStart() } },
-                onMarkEnd = { PlayerBus.post { it.markHighlightEnd() } },
-                onRingtone = { PlayerBus.post { it.setAsRingtone() } },
             )
 
             PAGE_SETTINGS -> SettingsScreen(

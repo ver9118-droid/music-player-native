@@ -42,7 +42,6 @@ import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
@@ -478,9 +477,6 @@ fun NowPlayingScreen(
     onRepeat: (String) -> Unit,
     onInfinite: (Boolean) -> Unit,
     onSection: (Long, Long) -> Unit,
-    onMarkStart: () -> Unit,
-    onMarkEnd: () -> Unit,
-    onRingtone: () -> Unit,
 ) {
     // 재생 위치는 이 화면에서만 구독 (홈 화면 재렌더링 방지)
     val tick by org.music.infiniteplayer.playback.PlayerBus.tick
@@ -586,17 +582,11 @@ fun NowPlayingScreen(
             Text(formatTime(tick.durationMs), color = TextSecondary, fontSize = 11.5.sp)
         }
 
-        // 구간/벨소리/다운로드
+        // 구간 · 다운로드
         ActionChips(
             state = state,
             onFirstHalf = { onSection(0L, tick.durationMs / 2) },
             onSecondHalf = { onSection(tick.durationMs / 2, tick.durationMs) },
-            onMarkStart = onMarkStart,
-            onMarkEnd = onMarkEnd,
-            onPlayHighlight = {
-                onSection(state.highlightStartMs, state.highlightEndMs)
-            },
-            onRingtone = onRingtone,
             onDownload = onDownload,
         )
 
@@ -891,19 +881,14 @@ private fun ActionButton(text: String, bg: Color, fg: Color, onClick: () -> Unit
     }
 }
 
-/** 구간 · 벨소리 · 다운로드 칩 */
+/** 구간 · 다운로드 칩 */
 @Composable
 private fun ActionChips(
     state: PlayerState,
     onFirstHalf: () -> Unit,
     onSecondHalf: () -> Unit,
-    onMarkStart: () -> Unit,
-    onMarkEnd: () -> Unit,
-    onPlayHighlight: () -> Unit,
-    onRingtone: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    val hasHighlight = state.highlightStartMs >= 0 && state.highlightEndMs > state.highlightStartMs
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -913,20 +898,6 @@ private fun ActionChips(
     ) {
         SmallChip("전반부", false, null) { onFirstHalf() }
         SmallChip("후반부", false, null) { onSecondHalf() }
-        SmallChip(
-            text = if (state.highlightStartMs >= 0) "A ${formatTime(state.highlightStartMs)}" else "A 지정",
-            selected = state.highlightStartMs >= 0,
-            icon = null,
-        ) { onMarkStart() }
-        SmallChip(
-            text = if (state.highlightEndMs >= 0) "B ${formatTime(state.highlightEndMs)}" else "B 지정",
-            selected = state.highlightEndMs >= 0,
-            icon = null,
-        ) { onMarkEnd() }
-        if (hasHighlight) {
-            SmallChip("하이라이트", true, null) { onPlayHighlight() }
-        }
-        SmallChip("벨소리", false, Icons.Rounded.Notifications) { onRingtone() }
         SmallChip(
             text = if (state.downloadProgress >= 0) "내려받는 중 ${state.downloadProgress}%" else "다운로드",
             selected = false,

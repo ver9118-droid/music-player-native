@@ -49,9 +49,7 @@ data class PlayerState(
     val lyrics: List<LyricLine> = emptyList(),
     val callActive: Boolean = false,
     val downloadProgress: Int = -1,       // 로컬 다운로드 진행률 (-1 = 없음)
-    // ── 구간/하이라이트 ───────────────────────────────────────
-    val highlightStartMs: Long = -1,      // 하이라이트 시작점 (A)
-    val highlightEndMs: Long = -1,        // 하이라이트 끝점 (B)
+    // ── 구간 반복 ───────────────────────────────────────────────
     val sectionStartMs: Long = -1,        // 반복 재생 구간 시작
     val sectionEndMs: Long = -1,          // 반복 재생 구간 끝
     val toast: String = "",               // 사용자에게 보여줄 메시지
