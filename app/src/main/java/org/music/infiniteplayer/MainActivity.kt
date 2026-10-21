@@ -46,6 +46,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // 서비스가 죽었었으면(최근 목록에서 제거 등) 다시 살린다.
+        // 화면이 다시 앞으로 왔으므로 startService 가 허용된다.
+        ensureService()
+    }
+
+    private fun ensureService() {
+        if (org.music.infiniteplayer.playback.PlayerBus.isAttached()) return
+        try {
+            startService(Intent(this, PlaybackService::class.java))
+        } catch (e: Exception) {
+            org.music.infiniteplayer.core.CrashLog.save(e)
+        }
+    }
+
     private fun askPermissions() {
         val wanted = ArrayList<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

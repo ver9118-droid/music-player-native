@@ -178,8 +178,9 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val p = player
-        if (p == null || !p.isPlaying) stopSelf()
+        // 앱을 최근 목록에서 밀어내더라도 세션(차량 블루투스/알림)은 유지한다.
+        // 재생 중이 아니어도 서비스를 바로 죽이지 않는다.
+        // (죽으면 UI 는 살아있는데 명령이 전달되지 않아 버튼이 먹통이 된다)
         super.onTaskRemoved(rootIntent)
     }
 
@@ -642,8 +643,8 @@ class PlaybackService : MediaSessionService() {
     /** ExoPlayer 의 실제 상태를 그대로 보여준다 (버퍼링/오류를 '재생 중'으로 덮지 않는다) */
     private fun refreshStatus() {
         // 진행 중 안내(다운로드/자르기 등)는 자동 상태에 덮어쓰지 않는다
-        if (manualStatus.isNotBlank()) {
-            statusText = manualStatus
+        if (manualStatusText.isNotBlank()) {
+            statusText = manualStatusText
             return
         }
         val p = player
