@@ -50,6 +50,7 @@ fun RootScreen() {
     var message by remember { mutableStateOf("") }
     var quality by remember { mutableStateOf(Prefs.quality) }
     var favorites by remember { mutableStateOf(loadFavorites()) }
+    var crashLog by remember { mutableStateOf(org.music.infiniteplayer.core.CrashLog.read()) }
 
     // ── 통합 검색 ────────────────────────────────────────────
     var searchQuery by remember { mutableStateOf("") }
@@ -183,6 +184,8 @@ fun RootScreen() {
                     searchQuery = searchQuery,
                     searchActive = searchActive,
                     searching = searching,
+                    crashLog = crashLog,
+                    onOpenDiagnostics = { page = PAGE_DIAG },
                     onQueryChange = { q ->
                         searchQuery = q
                         if (q.isBlank()) {

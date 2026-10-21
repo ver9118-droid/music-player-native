@@ -103,6 +103,8 @@ fun HomeScreen(
     searchQuery: String,
     searchActive: Boolean,
     searching: Boolean,
+    crashLog: String,
+    onOpenDiagnostics: () -> Unit,
     onQueryChange: (String) -> Unit,
     onSearchSubmit: () -> Unit,
     onClearSearch: () -> Unit,
@@ -144,6 +146,36 @@ fun HomeScreen(
             }
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Rounded.Settings, "설정", tint = TextSecondary)
+            }
+        }
+
+        // 직전 실행에서 발생한 오류 안내
+        if (crashLog.isNotBlank()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Danger.copy(alpha = 0.14f))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "지난 실행에서 오류가 발생했습니다",
+                    color = Danger,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Danger)
+                        .clickable(onClick = onOpenDiagnostics)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Text("확인", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
@@ -227,7 +259,7 @@ fun HomeScreen(
             state = rememberLazyListState(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 12.dp),
         ) {
-            itemsIndexed(tracks, key = { _, t -> t.id }) { index, track ->
+            itemsIndexed(tracks, key = { index, t -> "${t.id}#$index" }) { index, track ->
                 TrackRow(
                     track = track,
                     rank = track.rank.takeIf { it > 0 } ?: (index + 1),
@@ -731,6 +763,7 @@ fun DiagnosticsScreen(
     onDownload: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
+    val crash = remember { org.music.infiniteplayer.core.CrashLog.read() }
     val report = remember(state, diag) {
         buildString {
             appendLine("무한 음악 플레이어 진단")
@@ -773,6 +806,7 @@ fun DiagnosticsScreen(
                     DiagRow("출력 경로", diag.audioRoute.ifBlank { "-" })
                     DiagRow("앱 볼륨", "%.0f%%".format(state.volume * 100))
                     DiagRow("오류", state.error.ifBlank { "없음" })
+                    DiagRow("최근 크래시", if (crash.isBlank()) "없음" else "있음 (아래에서 복사)")
                     if (state.downloadProgress >= 0) {
                         DiagRow("다운로드", "${state.downloadProgress}%")
                     }
@@ -787,6 +821,18 @@ fun DiagnosticsScreen(
                     Spacer(Modifier.height(10.dp))
                     ActionButton("진단 내용 복사", Surface2, TextPrimary) {
                         clipboard.setText(AnnotatedString(report))
+                    }
+                    if (crash.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        ActionButton("크래시 로그 복사", Surface2, TextPrimary) {
+                            clipboard.setText(AnnotatedString(crash))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "최근 크래시 로그입니다. 복사해서 개발자에게 보내주세요.",
+                            color = Danger,
+                            fontSize = 11.5.sp,
+                        )
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(

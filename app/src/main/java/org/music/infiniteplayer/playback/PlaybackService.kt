@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -52,7 +53,13 @@ class PlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private var callGuard: CallGuard? = null
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate +
+                // 코루틴 예외가 앱을 죽이지 않도록 처리 (재생 유지)
+                CoroutineExceptionHandler { _, error ->
+                    runCatching { org.music.infiniteplayer.core.CrashLog.save(error) }
+                }
+    )
     private lateinit var youtube: YoutubeRepository
     private val lyricsRepo = LyricsRepository()
 
@@ -588,7 +595,11 @@ class PlaybackService : MediaSessionService() {
     private fun startDiagnosticsLoop() {
         scope.launch(Dispatchers.IO) {
             while (isActive) {
-                refreshDiagnostics()
+                try {
+                    refreshDiagnostics()
+                } catch (e: Exception) {
+                    // 진단 실패가 앱을 죽이면 안 된다
+                }
                 delay(10_000)
             }
         }
@@ -1037,13 +1048,13 @@ class PlaybackService : MediaSessionService() {
             statusText = "음원 내려받는 중..."
             publish()
             val dest = File(cacheDir, "audio_${entry.track.id.hashCode()}.m4a")
-            val ok = org.music.infiniteplayer.core.Downloader.download(url, dest) { percent ->
+            val res = org.music.infiniteplayer.core.Downloader.download(url, dest) { percent ->
                 downloadProgress = percent
                 publish()
             }
             downloadProgress = -1
-            if (!ok) {
-                errorText = "음원 내려받기에 실패했습니다 (주소 만료 또는 네트워크 차단)"
+            if (!res.ok) {
+                errorText = "음원 내려받기에 실패했습니다 (${res.error})"
                 publish()
                 return@launch
             }
