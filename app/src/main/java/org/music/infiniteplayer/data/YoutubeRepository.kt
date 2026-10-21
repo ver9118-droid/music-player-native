@@ -84,7 +84,7 @@ class YoutubeRepository(var quality: String = "high") {
             resolveVideo(videoId, title, artist, thumb, duration, preferItags)
         }
 
-    private fun resolveVideo(
+    private suspend fun resolveVideo(
         videoId: String,
         title: String,
         artist: String,

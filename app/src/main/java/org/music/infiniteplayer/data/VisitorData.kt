@@ -14,7 +14,7 @@ import org.music.infiniteplayer.core.Prefs
  */
 object VisitorData {
 
-    private const val VISITOR_RE = "\"VISITOR_DATA\":\"([^\"]+)\""
+    private val VISITOR_RE = Regex("\"VISITOR_DATA\":\"([^\"]+)\"")
     private const val PAGE = "https://www.youtube.com/"
 
     @Volatile

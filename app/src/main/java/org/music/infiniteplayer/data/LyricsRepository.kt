@@ -34,6 +34,30 @@ class LyricsRepository {
     }
 
     private fun parse(xml: String): List<LyricLine> {
+        // 자막 포맷이 2가지 있다.
+        //  A) <timedtext format="3"><body><p t="1020" d="6660">가사</p></body></timedtext>
+        //  B) <transcript><text start="1.02" dur="6.66">가사</text></transcript>
+        if (xml.contains("<transcript")) return parseTranscript(xml)
+        return parseTimedText(xml)
+    }
+
+    /** B) <transcript><text start dur> */
+    private fun parseTranscript(xml: String): List<LyricLine> {
+        val out = ArrayList<LyricLine>(120)
+        val re = Regex("<text[^>]*start=\"([0-9.]+)\"[^>]*dur=\"([0-9.]+)\"[^>]*>(.*?)</text>", RegexOption.DOT_MATCHES_ALL)
+        re.findAll(xml).forEach { m ->
+            val text = decode(m.groupValues[3])
+            if (text.isNotEmpty()) {
+                val start = (m.groupValues[1].toDouble() * 1000).toLong()
+                val dur = (m.groupValues[2].toDouble() * 1000).toLong()
+                out.add(LyricLine(start, start + dur, text))
+            }
+        }
+        return out
+    }
+
+    /** A) <timedtext><body><p t d> */
+    private fun parseTimedText(xml: String): List<LyricLine> {
         val out = ArrayList<LyricLine>(120)
         try {
             val factory = XmlPullParserFactory.newInstance()
@@ -74,5 +98,12 @@ class LyricsRepository {
             // 파싱 실패 → 빈 가사
         }
         return out
+    }
+
+    /** 자막 텍스트 정리 (엔티티/공백) */
+    private fun decode(raw: String): String {
+        var s = raw.replace("<br/>", " ").replace("<br>", " ")
+        s = org.music.infiniteplayer.core.Text.clean(s)
+        return s.trim()
     }
 }
