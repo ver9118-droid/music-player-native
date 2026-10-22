@@ -183,6 +183,7 @@ fun RootScreen() {
                 onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
                 onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
                 onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
+                onDiagnostics = { b -> PlayerBus.post { it.setDiagnostics(b) } },
                 onQuality = { q ->
                     quality = q
                     Prefs.quality = q
@@ -209,12 +210,9 @@ fun RootScreen() {
                     state = state,
                     sourceKey = sourceKey,
                     loading = loading,
-                    message = message,
                     searchQuery = searchQuery,
                     searchActive = searchActive,
                     searching = searching,
-                    crashLog = crashLog,
-                    freezeDetected = freezeDetected,
                     favorites = favorites,
                     onPlayFavorite = playFavorite,
                     onPlayAllFavorites = {
@@ -223,7 +221,6 @@ fun RootScreen() {
                             page = PAGE_PLAYER
                         }
                     },
-                    onOpenDiagnostics = { page = PAGE_DIAG },
                     onQueryChange = { q ->
                         searchQuery = q
                         if (q.isBlank()) {

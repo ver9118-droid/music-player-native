@@ -435,6 +435,25 @@ class PlaybackService : MediaSessionService() {
         publish()
     }
 
+    /**
+     * 진단 모드 켜기/끄기.
+     *
+     *  - 끔(기본) : 오류 배너를 숨기고 오류/스택 기록도 남기지 않는다
+     *  - 켬      : 진단 화면·오류 표시·기록을 모두 사용
+     */
+    fun setDiagnostics(enabled: Boolean) {
+        Prefs.diagnostics = enabled
+        if (!enabled) {
+            errorText = ""
+            runCatching { org.music.infiniteplayer.core.CrashLog.clear() }
+        }
+        toast(
+            if (enabled) "진단 모드: 켬 (오류 표시·기록)"
+            else "진단 모드: 끔 (오류 숨김)"
+        )
+        publish()
+    }
+
     fun stopPlayback() {
         val p = player ?: return
         userWantsPlay = false
@@ -506,9 +525,30 @@ class PlaybackService : MediaSessionService() {
             val audio = resolveEntry(entry)
             preparing = false
             if (audio == null) {
-                errorText = "'${entry.track.title}' 을(를) 찾을 수 없습니다."
-                statusText = "재생 실패"
-                publish()
+                // 곡을 찾지 못했으면 오류를 띄우지 않고 조용히 다음 곡으로 넘어간다.
+                // (목록에는 보이는데 재생만 안 되는 곡 때문에 앱이 멈춘 것처럼 보이던 문제)
+                entry.job = null
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastFailureAt > 60_000L) consecutiveFailures = 0
+                lastFailureAt = now
+                consecutiveFailures++
+                if (consecutiveFailures >= 4) {
+                    // 연속 실패 : 끝없이 곡만 넘어가지 않도록 여기서 멈춘다
+                    consecutiveFailures = 0
+                    errorText = "연속 재생 실패 · 네트워크를 확인해 주세요"
+                    statusText = "재생 실패"
+                    publish()
+                    return@launch
+                }
+                val following = target + 1
+                if (following < order.size) {
+                    statusText = "'${entry.track.title}' 건너뛰는 중..."
+                    publish()
+                    kotlinx.coroutines.delay(250)
+                    jumpTo(following, autoPlay = true)
+                } else {
+                    stopPlayback()
+                }
                 return@launch
             }
             val items = ArrayList<MediaItem>(1)
@@ -742,6 +782,7 @@ class PlaybackService : MediaSessionService() {
             shuffle = shuffleOn,
             repeat = repeatMode,
             infinite = infinite,
+            diagnostics = Prefs.diagnostics,
             volume = volume,
             status = statusText,
             error = errorText,

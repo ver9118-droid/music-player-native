@@ -101,16 +101,12 @@ fun HomeScreen(
     state: PlayerState,
     sourceKey: String,
     loading: Boolean,
-    message: String,
     searchQuery: String,
     searchActive: Boolean,
     searching: Boolean,
-    crashLog: String,
-    freezeDetected: Boolean,
     favorites: List<Track>,
     onPlayFavorite: (Track) -> Unit,
     onPlayAllFavorites: () -> Unit,
-    onOpenDiagnostics: () -> Unit,
     onQueryChange: (String) -> Unit,
     onSearchSubmit: () -> Unit,
     onClearSearch: () -> Unit,
@@ -162,37 +158,6 @@ fun HomeScreen(
             onPlayAll = onPlayAllFavorites,
         )
 
-        // 직전 실행에서 발생한 오류 안내
-        if (crashLog.isNotBlank() || freezeDetected) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Danger.copy(alpha = 0.14f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (freezeDetected)
-                        "지난 실행에서 앱이 멈췄습니다 (진단 가능)" else "지난 실행에서 오류가 발생했습니다",
-                    color = Danger,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Danger)
-                        .clickable(onClick = onOpenDiagnostics)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    Text("확인", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
         // 검색창 (통합검색 : 노래관련 영상만)
         SearchField(
             query = searchQuery,
@@ -225,21 +190,8 @@ fun HomeScreen(
             }
         }
 
-        if (message.isNotBlank()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Danger.copy(alpha = 0.14f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            ) {
-                Text(message, color = Danger, fontSize = 13.sp)
-            }
-        }
-
-        // 재생 오류 안내
-        if (state.error.isNotBlank()) {
+        // 재생 오류 안내 (진단 모드가 켜져 있을 때만 표시)
+        if (state.diagnostics && state.error.isNotBlank()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -894,6 +846,26 @@ fun DiagnosticsScreen(
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
+            if (!state.diagnostics) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Surface1)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Text(
+                            "진단 모드가 꺼져 있습니다.\n" +
+                                "설정 → 재생 진단에서 켜면 오류 메시지와 기록이 표시됩니다.",
+                            color = TextSecondary,
+                            fontSize = 12.5.sp,
+                            lineHeight = 18.sp,
+                        )
+                    }
+                }
+            }
             item {
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
                     DiagRow("버전", org.music.infiniteplayer.core.CrashLog.BuildInfo.VERSION)
@@ -1117,6 +1089,7 @@ fun SettingsScreen(
     onShuffle: (Boolean) -> Unit,
     onRepeat: (String) -> Unit,
     onInfinite: (Boolean) -> Unit,
+    onDiagnostics: (Boolean) -> Unit,
     onQuality: (String) -> Unit,
     favorites: List<Track>,
     onRemoveFavorite: (Track) -> Unit,
@@ -1301,6 +1274,20 @@ fun SettingsScreen(
 
             item {
                 SectionTitle("재생 진단")
+                SettingRow(
+                    title = "진단 모드",
+                    subtitle = if (state.diagnostics) {
+                        "오류 메시지 표시 · 오류 기록 저장"
+                    } else {
+                        "오류 메시지 숨김 · 기록 저장 안 함"
+                    },
+                ) {
+                    Switch(
+                        checked = state.diagnostics,
+                        onCheckedChange = onDiagnostics,
+                        colors = switchColors(),
+                    )
+                }
                 SettingRow(
                     title = "진단 정보 보기",
                     subtitle = "소리가 안 나거나 재생이 안 될 때 확인하세요",

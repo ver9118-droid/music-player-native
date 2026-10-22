@@ -28,6 +28,7 @@ object Prefs {
     const val KEY_CHART_PREFIX = "chart_"
     const val KEY_LAST_ERROR = "last_error"       // 최근 오류 (진단용, 지워지지 않음)
     const val KEY_LAST_ERROR_AT = "last_error_at" // 최근 오류 시각
+    const val KEY_DIAGNOSTICS = "diagnostics"     // 진단 모드 (오류 표시·기록)
 
     fun init(ctx: Context) {
         if (!::sp.isInitialized) {
@@ -72,6 +73,18 @@ object Prefs {
     var lastErrorAt: String
         get() = sp.getString(KEY_LAST_ERROR_AT, "") ?: ""
         set(v) = sp.edit().putString(KEY_LAST_ERROR_AT, v).apply()
+
+    /**
+     * 진단 모드.
+     *
+     *  - 꺼짐(기본) : 오류 메시지를 화면에 띄우지 않고, 오류/스택 기록도 남기지 않는다
+     *                (평소 사용에는 조용하고 가볍게)
+     *  - 켜짐      : 오류 배너·진단 화면·로그 기록을 모두 사용
+     *                (문제가 생겼을 때 사용자가 직접 켠다)
+     */
+    var diagnostics: Boolean
+        get() = sp.getBoolean(KEY_DIAGNOSTICS, false)
+        set(v) = sp.edit().putBoolean(KEY_DIAGNOSTICS, v).apply()
 
     /** 유튜브 방문자 ID (봇 판정 회피용) */
     var visitorData: String

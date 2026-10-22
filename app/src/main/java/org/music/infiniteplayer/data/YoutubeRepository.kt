@@ -71,13 +71,22 @@ class YoutubeRepository(var quality: String = "high") {
      */
     suspend fun resolve(track: Track, preferItags: List<Int>? = null): ResolvedAudio? =
         withContext(Dispatchers.IO) {
-            val candidates = if (track.videoId.isNotBlank()) {
-                listOf(track)
-            } else {
-                searchCandidates(track)
+            // 1) 곡에 영상 ID 가 있으면 그 영상을 먼저 시도한다.
+            if (track.videoId.isNotBlank()) {
+                val direct = resolveVideo(
+                    track.videoId,
+                    track.title,
+                    track.artist,
+                    track.thumbUrl,
+                    track.durationMs,
+                    preferItags,
+                )
+                if (direct != null) return@withContext direct
+                // 2) 그 영상이 막혀 있으면(라이브/연령/지역 제한/삭제)
+                //    같은 곡의 다른 영상으로 대체한다. (목록엔 보이는데 재생만 안 되는 문제)
             }
-            if (candidates.isEmpty()) return@withContext null
-            for (candidate in candidates) {
+            // 3) 검색으로 후보를 찾아 점수 높은 순으로 시도
+            for (candidate in searchCandidates(track)) {
                 val audio = resolveVideo(
                     candidate.videoId,
                     candidate.title,

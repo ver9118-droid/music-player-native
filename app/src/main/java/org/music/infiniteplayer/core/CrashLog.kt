@@ -73,6 +73,8 @@ object CrashLog {
     }
 
     private fun save(text: String) {
+        // 진단 모드가 꺼져 있으면 기록을 남기지 않는다 (기본값: 꺼짐)
+        if (!enabled()) return
         val trimmed = if (text.length > MAX_SIZE) text.takeLast(MAX_SIZE) else text
         try {
             file?.writeText(trimmed)
@@ -122,6 +124,7 @@ object CrashLog {
 
     /** 메인 스레드 스택 덤프 저장 (덮어쓰기) */
     fun saveStack(text: String) {
+        if (!enabled()) return
         try {
             stackFile?.writeText(text)
         } catch (_: Exception) {
@@ -149,6 +152,21 @@ object CrashLog {
             externalFile?.delete()
         } catch (_: Exception) {
         }
+        try {
+            stackFile?.delete()
+        } catch (_: Exception) {
+        }
+        try {
+            externalStackFile?.delete()
+        } catch (_: Exception) {
+        }
+    }
+
+    /** 진단 모드 여부 (꺼짐이면 아무 기록도 남기지 않는다) */
+    private fun enabled(): Boolean = try {
+        Prefs.diagnostics
+    } catch (_: Throwable) {
+        false
     }
 
     /** 앱 버전 정보 (빌드 설정에서 자동) */

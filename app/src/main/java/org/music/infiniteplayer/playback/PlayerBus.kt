@@ -45,6 +45,7 @@ data class PlayerState(
     val shuffle: Boolean = false,
     val repeat: String = "all",
     val infinite: Boolean = true,
+    val diagnostics: Boolean = false,
     val volume: Float = 0.85f,
     val status: String = "",
     val error: String = "",
