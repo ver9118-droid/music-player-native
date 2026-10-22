@@ -180,7 +180,15 @@ fun RootScreen() {
                     favorites = loadFavorites()
                 },
                 onPlayFavorite = { track ->
-                    PlayerBus.post { it.setQueue(listOf(track), 0) }
+                    // 즐겨찾기는 "누른 곡만" 이 아니라 즐겨찾기 목록 전체를
+                    // 그 곡부터 재생한다. (1곡만 넣으면 다음 곡/전체 반복이 의미가 없다)
+                    val list = favorites
+                    val idx = list.indexOfFirst { it.id == track.id }
+                    if (list.isEmpty()) {
+                        PlayerBus.post { it.setQueue(listOf(track), 0) }
+                    } else {
+                        PlayerBus.post { it.setQueue(list, if (idx < 0) 0 else idx) }
+                    }
                     page = PAGE_PLAYER
                 },
             )
