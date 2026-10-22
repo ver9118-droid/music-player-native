@@ -85,6 +85,8 @@ object StreamRange {
     private fun tryConnect(url: String, start: Long, length: Long, total: Long): HttpURLConnection? {
         var conn: HttpURLConnection? = null
         try {
+            // 파일 크기를 아는데 시작 위치가 이미 끝을 넘었으면 요청 자체가 403 이 된다
+            if (total > 0 && start >= total) return null
             conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 15_000
@@ -93,7 +95,11 @@ object StreamRange {
                 setRequestProperty("User-Agent", Net.UA_YT)
                 setRequestProperty("Accept", "*/*")
             }
-            val end = if (length != LENGTH_UNSET) start + length - 1 else total - 1
+            // 요청 끝을 반드시 파일 크기 안으로 자른다.
+            // (ExoPlayer 는 청크 단위로 읽으므로 마지막 청크가 EOF 를 넘기기 쉽고,
+            //  유튜브는 범위 끝이 파일 크기를 넘으면 403 을 준다 → IO_UNSPECIFIED)
+            val wanted = if (length != LENGTH_UNSET) start + length - 1 else total - 1
+            val end = if (total > 0) minOf(wanted, total - 1) else wanted
             if (end >= start) {
                 conn.setRequestProperty("Range", "bytes=$start-$end")
             }
@@ -138,6 +144,19 @@ class RangeDataSource : DataSource {
         currentSpec = dataSpec
         transferListener?.onTransferInitializing(this, dataSpec, true)
 
+        // 이미 파일 끝을 지난 위치를 요청하면 유튜브가 403 을 준다.
+        // (곡이 끝나는 순간 ExoPlayer 가 한 번 더 여는 경우가 있다)
+        // 이때는 오류가 아니라 "읽을 데이터 없음"으로 처리한다.
+        val known = StreamRange.contentLengthOf(url)
+        if (known > 0 && dataSpec.position >= known) {
+            connection = null
+            totalLength = known
+            bytesRemaining = 0
+            responseHeaders = emptyMap()
+            transferListener?.onTransferStart(this, dataSpec, true)
+            return 0
+        }
+
         val (conn, total) = StreamRange.open(url, dataSpec.position, dataSpec.length)
         connection = conn
 
@@ -146,20 +165,41 @@ class RangeDataSource : DataSource {
         val realTotal = range?.substringAfterLast("/")?.toLongOrNull()
         totalLength = if (realTotal != null && realTotal > 0) realTotal else total
 
-        bytesRemaining = if (dataSpec.length != StreamRange.LENGTH_UNSET) {
-            dataSpec.length
+        val available: Long = if (totalLength > 0) {
+            (totalLength - dataSpec.position).coerceAtLeast(0)
         } else {
-            val contentLen = conn.contentLengthLong
-            if (contentLen > 0) contentLen else (totalLength - dataSpec.position).coerceAtLeast(0)
+            StreamRange.LENGTH_UNSET
         }
+        val remaining: Long = when {
+            dataSpec.length != StreamRange.LENGTH_UNSET && available != StreamRange.LENGTH_UNSET ->
+                minOf(dataSpec.length, available)
+            dataSpec.length != StreamRange.LENGTH_UNSET -> dataSpec.length
+            else -> available
+        }
+
+        bytesRemaining = remaining
         responseHeaders = conn.headerFields?.filterKeys { it != null } ?: emptyMap()
         transferListener?.onTransferStart(this, dataSpec, true)
-        return totalLength
+        // 중요: DataSource.open() 은 "지금부터 읽을 수 있는 남은 바이트 수"를 돌려줘야 한다.
+        // 전체 길이(totalLength)를 돌려주면 ExoPlayer 가 남은 양을 잘못 계산해서
+        // 파일 끝을 넘는 Range 를 요청하고, 유튜브가 403 을 주면서
+        // ERROR_CODE_IO_UNSPECIFIED 로 곡이 멈춘다.
+        return remaining
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        // 남은 길이를 넘겨 읽지 않는다 (넘기면 서버가 403 → IO 오류)
+        if (bytesRemaining == 0L) {
+            currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
+            return C.RESULT_END_OF_INPUT
+        }
         val conn = connection ?: throw IOException("닫힌 데이터 소스")
-        val n = conn.inputStream.read(buffer, offset, length)
+        val want = if (bytesRemaining > 0 && bytesRemaining < length) {
+            bytesRemaining.toInt()
+        } else {
+            length
+        }
+        val n = conn.inputStream.read(buffer, offset, want)
         if (n == -1) {
             bytesRemaining = 0
             currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
