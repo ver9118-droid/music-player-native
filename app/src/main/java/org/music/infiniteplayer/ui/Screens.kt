@@ -766,6 +766,7 @@ fun DiagnosticsScreen(
             appendLine("곡: ${state.title} / ${state.artist}  (${state.index + 1}/${state.count})")
             appendLine("반복 모드: ${state.repeat} (무한 재생=${state.infinite}, 셔플=${state.shuffle})")
             appendLine("상태: ${state.status} (player=${diag.playerState}, playing=${state.playing}, buffering=${state.buffering})")
+            appendLine("재생 순서: ${diag.queueInfo}")
             appendLine("스트림: ${diag.streamInfo}")
             appendLine("주소 응답: ${diag.streamProbe}")
             appendLine("시스템 볼륨: ${diag.systemVolume}")
@@ -797,6 +798,7 @@ fun DiagnosticsScreen(
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
                     DiagRow("버전", org.music.infiniteplayer.core.CrashLog.BuildInfo.VERSION)
                     DiagRow("재생 상태", "${state.status}  (${diag.playerState})")
+                    DiagRow("재생 순서", diag.queueInfo.ifBlank { "-" })
                     DiagRow("재생 중", if (state.playing) "예" else "아니오")
                     DiagRow("버퍼링", if (state.buffering) "예" else "아니오")
                     DiagRow("스트림", diag.streamInfo.ifBlank { "-" })

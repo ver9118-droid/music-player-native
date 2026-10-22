@@ -516,6 +516,8 @@ class PlaybackService : MediaSessionService() {
             currentEntry = entry
             p.setMediaItems(items, 0, 0L)
             p.prepare()
+            // 외부(블루투스/차량/알림)에서 반복 모드가 바뀌었을 수 있으므로 다시 적용
+            applyPlayerRepeat()
             if (autoPlay) {
                 userWantsPlay = true
                 p.play()
@@ -774,6 +776,17 @@ class PlaybackService : MediaSessionService() {
         val state = playerStateName(p?.playbackState)
         val info = streamInfo
         val probe = streamProbe
+        val queue = if (p == null) {
+            "-"
+        } else {
+            val playerRepeat = when (p.repeatMode) {
+                Player.REPEAT_MODE_ONE -> "한곡"
+                Player.REPEAT_MODE_ALL -> "전체"
+                else -> "없음"
+            }
+            "pos=$pos / 순서=${order.size} / 큐=${p.mediaItemCount} / 시작=$windowStart" +
+                " / 설정=$repeatMode / 플레이어반복=$playerRepeat"
+        }
         scope.launch(Dispatchers.IO) {
             PlayerBus.publishDiagnostics(
                 Diagnostics(
@@ -785,6 +798,7 @@ class PlaybackService : MediaSessionService() {
                     serviceState = serviceStateText(),
                     notificationState = notificationStateText(),
                     uiLatency = uiLatencyText(),
+                    queueInfo = queue,
                 )
             )
         }
@@ -994,6 +1008,24 @@ class PlaybackService : MediaSessionService() {
             fillWindow()
         }
 
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            // 블루투스/차량/알림 등 외부에서 반복 모드를 바꾸면
+            // 앱 설정값으로 즉시 되돌린다.
+            // (외부에서 ALL 로 바뀌면 반복 끔/한 곡 반복이 전부 무시된다)
+            val p = player ?: return
+            val want = if (this@PlaybackService.repeatMode == "one") {
+                Player.REPEAT_MODE_ONE
+            } else {
+                Player.REPEAT_MODE_OFF
+            }
+            if (p.repeatMode != want) {
+                try {
+                    p.repeatMode = want
+                } catch (_: Exception) {
+                }
+            }
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 statusText = "재생 중"
@@ -1028,12 +1060,11 @@ class PlaybackService : MediaSessionService() {
                     startTicker()
                 }
                 else -> {
-                    // pos 가 순간적으로 어긋나도 안전하도록 플레이어 인덱스도 함께 본다
-                    val global = windowStart + (player?.currentMediaItemIndex ?: pos)
-                    val atTail = pos + 1 >= order.size || global + 1 >= order.size
-                    if (atTail && !canWrap) {
+                    // 반복/무한재생이 꺼져 있으면 "플레이어 큐의 끝 = 목록의 끝"이므로
+                    // 위치 계산 없이 그대로 정지한다. (인덱스가 어긋나도 안전)
+                    if (!canWrap) {
                         userWantsPlay = false
-                        statusText = "재생 종료"
+                        statusText = "재생 종료 (목록 끝)"
                         // 끝난 상태에서도 ▶ 를 누르면 다시 재생되도록 정리
                         runCatching { player?.pause() }
                     } else {

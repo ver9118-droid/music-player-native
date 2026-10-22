@@ -29,6 +29,7 @@ data class Diagnostics(
     val serviceState: String = "",
     val notificationState: String = "",
     val uiLatency: String = "",
+    val queueInfo: String = "",
 )
 
 /** UI 가 보는 재생 상태 (曲目 정보/설정 등 자주 안 바뀌는 것들). */
