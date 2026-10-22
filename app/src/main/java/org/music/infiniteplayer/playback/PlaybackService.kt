@@ -88,6 +88,9 @@ class PlaybackService : MediaSessionService() {
     /** 현재 재생 위치 (order 기준) */
     private var pos = -1
 
+    /** appendPermutation() 으로 뒤에 붙인 "다음 바퀴" 묶음 수 (반복 끄면 잘라낸다) */
+    private var appendedRounds = 0
+
     private var currentEntry: Entry? = null
     private var userWantsPlay = false
     private var callPaused = false
@@ -371,6 +374,7 @@ class PlaybackService : MediaSessionService() {
         repeatMode = mode
         Prefs.repeat = mode
         applyPlayerRepeat()
+        trimWrapTail()
         publish()
     }
 
@@ -390,6 +394,7 @@ class PlaybackService : MediaSessionService() {
     fun setInfinite(enabled: Boolean) {
         infinite = enabled
         Prefs.infinite = enabled
+        trimWrapTail()
         publish()
     }
 
@@ -420,6 +425,7 @@ class PlaybackService : MediaSessionService() {
         }
         windowStart = 0
         pos = -1
+        appendedRounds = 0
     }
 
     private fun appendPermutation() {
@@ -427,6 +433,35 @@ class PlaybackService : MediaSessionService() {
         val list = (0 until entries.size).toMutableList()
         if (shuffleOn) list.shuffle(Random(System.nanoTime()))
         order.addAll(list)
+        appendedRounds++
+    }
+
+    /**
+     * 반복/무한재생을 끄면 미리 붙여둔 "다음 바퀴" 항목을 잘라낸다.
+     *
+     * 잘라내지 않으면 목록 마지막 곡 뒤에 1번 곡이 이어져 있어서
+     * 반복을 껐는데도 계속 재생되는 것처럼 보인다.
+     */
+    private fun trimWrapTail() {
+        if (canWrap || appendedRounds <= 0 || entries.isEmpty()) return
+        val perRound = entries.size
+        val keep = order.size - appendedRounds * perRound
+        // 이미 다음 바퀴로 넘어와 재생 중이면 건드리지 않는다
+        if (keep <= 0 || pos >= keep) return
+        while (order.size > keep) order.removeAt(order.size - 1)
+        appendedRounds = 0
+
+        val p = player ?: return
+        // 현재 곡 뒤쪽의 "다음 바퀴" 항목을 플레이어 큐에서도 제거
+        val firstRemove = maxOf(keep, pos + 1) - windowStart
+        if (firstRemove in 0 until p.mediaItemCount) {
+            try {
+                p.removeMediaItems(firstRemove, p.mediaItemCount)
+            } catch (_: Exception) {
+                return
+            }
+            fillWindow()
+        }
     }
 
     /**
@@ -990,7 +1025,10 @@ class PlaybackService : MediaSessionService() {
                     startTicker()
                 }
                 else -> {
-                    if (pos + 1 >= order.size && !canWrap) {
+                    // pos 가 순간적으로 어긋나도 안전하도록 플레이어 인덱스도 함께 본다
+                    val global = windowStart + (player?.currentMediaItemIndex ?: pos)
+                    val atTail = pos + 1 >= order.size || global + 1 >= order.size
+                    if (atTail && !canWrap) {
                         userWantsPlay = false
                         statusText = "재생 종료"
                         // 끝난 상태에서도 ▶ 를 누르면 다시 재생되도록 정리

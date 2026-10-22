@@ -15,8 +15,8 @@ android {
         applicationId = "org.music.infiniteplayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 37
-        versionName = "2.8.5"
+        versionCode = 38
+        versionName = "2.8.6"
         resourceConfigurations += setOf("ko", "en")
     }
 
@@ -105,6 +105,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
+
 
 
 
