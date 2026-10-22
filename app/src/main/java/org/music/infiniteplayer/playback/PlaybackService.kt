@@ -92,6 +92,9 @@ class PlaybackService : MediaSessionService() {
     private var consecutiveFailures = 0
     private var lastFailureAt = 0L
 
+    /** 목록 끝까지 다 재생하고 멈춘 상태 (▶ 누르면 처음 곡부터 다시) */
+    private var endedAtList = false
+
     private var currentEntry: Entry? = null
     private var userWantsPlay = false
     private var callPaused = false
@@ -290,6 +293,12 @@ class PlaybackService : MediaSessionService() {
                 playTrack(0)
                 return
             }
+            // 목록 끝까지 재생해 멈춘 상태라면 처음 곡부터 다시 시작한다
+            if (endedAtList) {
+                endedAtList = false
+                jumpTo(0, autoPlay = true)
+                return
+            }
             // 목록 끝에서 stop() 된 경우(STATE_IDLE)에는 prepare() 부터 다시 해야 한다.
             // 끝까지 재생돼 멈춘 경우(STATE_ENDED)에는 처음 위치로 되감아야 한다.
             // 그냥 play() 만 하면 아무 일도 일어나지 않아 버튼이 죽은 것처럼 보인다.
@@ -429,6 +438,7 @@ class PlaybackService : MediaSessionService() {
     fun stopPlayback() {
         val p = player ?: return
         userWantsPlay = false
+        endedAtList = true
         p.pause()
         p.stop()
         statusText = "정지"
@@ -484,6 +494,7 @@ class PlaybackService : MediaSessionService() {
         generation++
         pos = target
         retryCount = 0
+        endedAtList = false
         downloadProgress = -1
         errorText = ""
         statusText = "'${entry.track.title}' 준비 중..."
@@ -1085,6 +1096,7 @@ class PlaybackService : MediaSessionService() {
                     // 위치 계산 없이 그대로 정지한다. (인덱스가 어긋나도 안전)
                     if (!canWrap) {
                         userWantsPlay = false
+                        endedAtList = true
                         statusText = "재생 종료 (목록 끝)"
                         // 끝난 상태에서도 ▶ 를 누르면 다시 재생되도록 정리
                         runCatching { player?.pause() }
