@@ -151,9 +151,13 @@ object CrashLog {
         }
     }
 
-    /** 앱 버전 정보 */
+    /** 앱 버전 정보 (빌드 설정에서 자동) */
     object BuildInfo {
-        const val VERSION = "2.1.3"
+        val VERSION: String = try {
+            org.music.infiniteplayer.BuildConfig.VERSION_NAME
+        } catch (_: Throwable) {
+            "?"
+        }
     }
 }
 

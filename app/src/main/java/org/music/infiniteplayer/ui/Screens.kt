@@ -760,8 +760,9 @@ fun DiagnosticsScreen(
     val stackDump = remember { org.music.infiniteplayer.core.CrashLog.readStack() }
     val report = remember(state, diag) {
         buildString {
-            appendLine("무한 음악 플레이어 진단")
-            appendLine("곡: ${state.title} / ${state.artist}")
+            appendLine("무한 음악 플레이어 진단 v${org.music.infiniteplayer.core.CrashLog.BuildInfo.VERSION}")
+            appendLine("곡: ${state.title} / ${state.artist}  (${state.index + 1}/${state.count})")
+            appendLine("반복 모드: ${state.repeat} (무한 재생=${state.infinite}, 셔플=${state.shuffle})")
             appendLine("상태: ${state.status} (player=${diag.playerState}, playing=${state.playing}, buffering=${state.buffering})")
             appendLine("스트림: ${diag.streamInfo}")
             appendLine("주소 응답: ${diag.streamProbe}")
@@ -791,6 +792,7 @@ fun DiagnosticsScreen(
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             item {
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
+                    DiagRow("버전", org.music.infiniteplayer.core.CrashLog.BuildInfo.VERSION)
                     DiagRow("재생 상태", "${state.status}  (${diag.playerState})")
                     DiagRow("재생 중", if (state.playing) "예" else "아니오")
                     DiagRow("버퍼링", if (state.buffering) "예" else "아니오")
@@ -1174,7 +1176,7 @@ fun SettingsScreen(
             item {
                 SectionTitle("정보")
                 Text(
-                    "무한 음악 플레이어 2.0.0\n" +
+                    "무한 음악 플레이어 ${org.music.infiniteplayer.core.CrashLog.BuildInfo.VERSION}\n" +
                             "네이티브(코틀린) + ExoPlayer 기반\n" +
                             "차트: 멜론 · 지니 · 유튜브 장르",
                     color = TextSecondary,

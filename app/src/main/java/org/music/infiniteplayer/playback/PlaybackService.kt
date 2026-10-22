@@ -987,6 +987,19 @@ class PlaybackService : MediaSessionService() {
 
         override fun onPlayerError(error: PlaybackException) {
             val desc = describeError(error)
+            val p = player
+            val duration = p?.duration ?: 0L
+            val position = p?.currentPosition ?: 0L
+            // 곡 끝부분(마지막 5초)에서 나는 IO 오류는 "끝까지 재생됨"으로 보고
+            // 오류를 띄우지 않고 다음 곡으로 넘어간다 (사용자 입장에서는 정상 종료)
+            if (duration > 0 && position >= duration - 5_000) {
+                retryCount = 0
+                errorText = ""
+                streamProbe = "끝부분 오류($desc) → 다음 곡"
+                publish()
+                next()
+                return
+            }
             errorText = "재생 오류 ($desc)"
             publish()
             recoverFromError(desc)
@@ -1358,6 +1371,10 @@ class PlaybackService : MediaSessionService() {
         while (cause != null) {
             if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
                 return "HTTP ${cause.responseCode}"
+            }
+            if (cause is androidx.media3.datasource.DataSourceException) {
+                val message = cause.message
+                if (!message.isNullOrBlank()) return message
             }
             if (cause is java.net.SocketTimeoutException) return "시간 초과"
             if (cause is java.net.UnknownHostException) return "DNS 실패"

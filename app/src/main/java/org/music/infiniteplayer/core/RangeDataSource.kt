@@ -64,6 +64,11 @@ object StreamRange {
         }
     }
 
+    /** 마지막 HTTP 응답 코드 (진단용) */
+    @Volatile
+    var lastHttpCode: Int = -1
+        private set
+
     /** 닫힌 Range 로 연결을 연다. 실패하면 길이를 다시 알아내어 1회 재시도한다. */
     fun open(url: String, start: Long, length: Long): Pair<HttpURLConnection, Long> {
         var total = contentLengthOf(url)
@@ -79,7 +84,11 @@ object StreamRange {
             conn = tryConnect(url, start, length, total)
             if (conn != null) return conn to total
         }
-        throw IOException("스트림을 열 수 없습니다")
+        // 어떤 HTTP 코드였는지 남겨야 원인(403/416/…)을 알 수 있다
+        throw androidx.media3.datasource.DataSourceException(
+            "HTTP ${if (lastHttpCode > 0) lastHttpCode else "?"} (pos=$start, total=$total)",
+            androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        )
     }
 
     private fun tryConnect(url: String, start: Long, length: Long, total: Long): HttpURLConnection? {
@@ -104,6 +113,7 @@ object StreamRange {
                 conn.setRequestProperty("Range", "bytes=$start-$end")
             }
             val code = conn.responseCode
+            lastHttpCode = code
             if (code == 200 || code == 206) return conn
             conn.disconnect()
             return null
