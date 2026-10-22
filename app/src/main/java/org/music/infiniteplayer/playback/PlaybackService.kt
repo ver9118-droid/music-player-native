@@ -91,6 +91,10 @@ class PlaybackService : MediaSessionService() {
     /** appendPermutation() 으로 뒤에 붙인 "다음 바퀴" 묶음 수 (반복 끄면 잘라낸다) */
     private var appendedRounds = 0
 
+    /** 연속으로 곡 재생에 실패한 횟수 (실패 폭주 시 무한 스킵 방지) */
+    private var consecutiveFailures = 0
+    private var lastFailureAt = 0L
+
     private var currentEntry: Entry? = null
     private var userWantsPlay = false
     private var callPaused = false
@@ -375,6 +379,14 @@ class PlaybackService : MediaSessionService() {
         Prefs.repeat = mode
         applyPlayerRepeat()
         trimWrapTail()
+        // 설정이 실제로 적용됐는지 눈으로 확인할 수 있게 알려준다
+        toast(
+            when (mode) {
+                "all" -> "반복: 전체"
+                "one" -> "반복: 한 곡"
+                else -> "반복: 끔"
+            }
+        )
         publish()
     }
 
@@ -395,6 +407,7 @@ class PlaybackService : MediaSessionService() {
         infinite = enabled
         Prefs.infinite = enabled
         trimWrapTail()
+        toast(if (enabled) "무한 재생: 켬" else "무한 재생: 끔")
         publish()
     }
 
@@ -980,6 +993,21 @@ class PlaybackService : MediaSessionService() {
             val idx = p.currentMediaItemIndex
             if (idx < 0) return
 
+            // 한 곡 반복 : 자동으로 다음 곡으로 넘어가면 원래 곡으로 되돌린다.
+            // (플레이어 반복 모드가 외부 요인으로 무시된 경우의 안전장치)
+            if (repeatMode == "one" && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                val prev = idx - 1
+                if (prev >= 0) {
+                    try {
+                        p.seekTo(prev, 0L)
+                        p.play()
+                    } catch (_: Exception) {
+                    }
+                    windowStart = pos - p.currentMediaItemIndex
+                    return
+                }
+            }
+
             val id = mediaItem?.mediaId
 
             // 1) 같은 곡인데 플레이어 인덱스만 바뀐 경우
@@ -1032,6 +1060,7 @@ class PlaybackService : MediaSessionService() {
                 // 실제로 재생 중이면 지난 오류 표시는 지운다.
                 // (복구에 성공했는데도 상단에 오류가 계속 남아 있는 문제)
                 errorText = ""
+                consecutiveFailures = 0
                 startTicker()
             } else if (!callPaused) {
                 val p = player
@@ -1095,6 +1124,18 @@ class PlaybackService : MediaSessionService() {
             if (duration > 0 && position >= duration - 5_000) {
                 retryCount = 0
                 errorText = ""
+                // 한 곡 반복 중이면 다음 곡으로 넘어가지 않고 같은 곡을 다시 튼다
+                if (this@PlaybackService.repeatMode == "one") {
+                    streamProbe = "끝부분 오류($desc) → 한 곡 반복"
+                    userWantsPlay = true
+                    publish()
+                    runCatching {
+                        p.seekTo(0)
+                        p.play()
+                    }
+                    startTicker()
+                    return
+                }
                 streamProbe = "끝부분 오류($desc) → 다음 곡"
                 publish()
                 next()
@@ -1295,6 +1336,19 @@ class PlaybackService : MediaSessionService() {
             retryCount = 0
             entry.audio = null
             entry.job = null
+            // 실패가 연달아 터지면 끝없이 곡만 넘어가므로 잠시 멈춘다
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastFailureAt > 60_000L) consecutiveFailures = 0
+            lastFailureAt = now
+            consecutiveFailures++
+            if (consecutiveFailures >= 4) {
+                consecutiveFailures = 0
+                errorText = "연속 재생 실패 ($desc) · 네트워크를 확인해 주세요"
+                statusText = "재생 실패"
+                runCatching { p.pause() }
+                publish()
+                return
+            }
             if (entries.size <= 1) {
                 errorText = "재생 오류 ($desc) · 재시도 실패"
                 statusText = "재생 실패"

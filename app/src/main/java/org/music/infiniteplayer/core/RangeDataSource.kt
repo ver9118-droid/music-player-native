@@ -104,11 +104,17 @@ object StreamRange {
                 setRequestProperty("User-Agent", Net.UA_YT)
                 setRequestProperty("Accept", "*/*")
             }
-            // 요청 끝을 반드시 파일 크기 안으로 자른다.
-            // (ExoPlayer 는 청크 단위로 읽으므로 마지막 청크가 EOF 를 넘기기 쉽고,
-            //  유튜브는 범위 끝이 파일 크기를 넘으면 403 을 준다 → IO_UNSPECIFIED)
-            val wanted = if (length != LENGTH_UNSET) start + length - 1 else total - 1
-            val end = if (total > 0) minOf(wanted, total - 1) else wanted
+            // 요청 끝을 "항상" 닫힌 범위로 만든다.
+            // 유튜브는 Range 헤더가 없거나 "bytes=0-" 같은 열린 범위면 403 을 준다.
+            // 길이를 모르는 경우에도 넉넉한 닫힌 범위로 요청하고,
+            // 실제 전체 길이는 응답의 Content-Range 에서 알아낸다.
+            val chunk = 8L * 1024 * 1024
+            val end = when {
+                total > 0 && length != LENGTH_UNSET -> minOf(start + length - 1, total - 1)
+                total > 0 -> total - 1
+                length != LENGTH_UNSET -> start + length - 1
+                else -> start + chunk - 1
+            }
             if (end >= start) {
                 conn.setRequestProperty("Range", "bytes=$start-$end")
             }
@@ -144,6 +150,7 @@ class RangeDataSource : DataSource {
     private var totalLength: Long = StreamRange.LENGTH_UNSET
     private var bytesRemaining: Long = 0
     private var absolutePosition: Long = 0
+    private var reopenCount = 0
     private var responseHeaders: Map<String, List<String>> = emptyMap()
 
     override fun addTransferListener(transferListener: TransferListener) {
@@ -192,6 +199,7 @@ class RangeDataSource : DataSource {
 
         bytesRemaining = remaining
         absolutePosition = dataSpec.position
+        reopenCount = 0
         responseHeaders = conn.headerFields?.filterKeys { it != null } ?: emptyMap()
         transferListener?.onTransferStart(this, dataSpec, true)
         // 길이를 "모른다"고 알려준다(-1).
@@ -215,6 +223,10 @@ class RangeDataSource : DataSource {
         val n = try {
             conn.inputStream.read(buffer, offset, want)
         } catch (e: IOException) {
+            // 끊겼으면 같은 위치에서 이어받기를 1회 시도한다
+            if (reopenCount < 3 && reopenAt(absolutePosition)) {
+                return read(buffer, offset, length)
+            }
             // 곡 끝부분(마지막 512KB)에서 연결이 끊기면 정상 종료로 본다.
             // (유튜브는 마지막 바이트를 보낸 뒤 연결을 바로 닫는다)
             val left = if (totalLength > 0) totalLength - absolutePosition else Long.MAX_VALUE
@@ -224,8 +236,25 @@ class RangeDataSource : DataSource {
                 return C.RESULT_END_OF_INPUT
             }
             throw e
+        } catch (e: RuntimeException) {
+            // 연결 상태가 깨진 경우 (IllegalStateException 등)
+            if (reopenCount < 3 && reopenAt(absolutePosition)) {
+                return read(buffer, offset, length)
+            }
+            val left = if (totalLength > 0) totalLength - absolutePosition else Long.MAX_VALUE
+            if (left <= 512 * 1024) {
+                bytesRemaining = 0
+                currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
+                return C.RESULT_END_OF_INPUT
+            }
+            throw IOException("스트림 읽기 실패 (${e.javaClass.simpleName})", e)
         }
         if (n == -1) {
+            // 받은 범위가 끝났는데 파일이 남아 있으면 이어서 받는다
+            val more = totalLength > 0 && absolutePosition < totalLength
+            if (more && reopenCount < 3 && reopenAt(absolutePosition)) {
+                return read(buffer, offset, length)
+            }
             bytesRemaining = 0
             currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
             return C.RESULT_END_OF_INPUT
@@ -238,14 +267,55 @@ class RangeDataSource : DataSource {
 
     override fun getUri(): Uri? = uri
 
+    /**
+     * 같은 위치에서 새 연결을 열어 이어받는다.
+     * (요청 범위가 끝났는데 파일이 남아 있거나, 연결이 끊긴 경우)
+     */
+    private fun reopenAt(position: Long): Boolean {
+        val spec = currentSpec ?: return false
+        val url = spec.uri?.toString() ?: return false
+        return try {
+            val (conn, total) = StreamRange.open(url, position, StreamRange.LENGTH_UNSET)
+            val range = conn.getHeaderField("Content-Range")
+            val realTotal = range?.substringAfterLast("/")?.toLongOrNull()
+            try {
+                connection?.disconnect()
+            } catch (_: Throwable) {
+            }
+            connection = conn
+            totalLength = when {
+                realTotal != null && realTotal > 0 -> realTotal
+                total > 0 -> total
+                else -> StreamRange.LENGTH_UNSET
+            }
+            absolutePosition = position
+            bytesRemaining = if (totalLength > 0) {
+                (totalLength - position).coerceAtLeast(0)
+            } else {
+                StreamRange.LENGTH_UNSET
+            }
+            reopenCount++
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     override fun close() {
-        currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
+        // 정리 과정에서 예외가 나도 절대 밖으로 던지지 않는다.
+        // (ExoPlayer 스레드에서 IllegalStateException 이 올라오면
+        //  "Source error" 로 재생이 통째로 실패한다)
+        try {
+            currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
+        } catch (_: Throwable) {
+        }
         try {
             connection?.disconnect()
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
         }
         connection = null
         bytesRemaining = 0
+        currentSpec = null
     }
 
     override fun getResponseHeaders(): Map<String, List<String>> = responseHeaders
