@@ -75,6 +75,13 @@ object PlayerBus {
     @Volatile
     private var service: PlaybackService? = null
 
+    /**
+     * 현재 재생 설정/위치 한 줄 요약.
+     * 워치독의 스택 덤프에 함께 기록되어, 화면 캡처만으로 상태를 알 수 있다.
+     */
+    @Volatile
+    var stateLine: String = ""
+
     private var pending: ((PlaybackService) -> Unit)? = null
 
     fun attach(svc: PlaybackService) {

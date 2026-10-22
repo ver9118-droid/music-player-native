@@ -310,6 +310,7 @@ class PlaybackService : MediaSessionService() {
 
     fun next() {
         if (order.isEmpty()) return
+        syncSettingsFromPrefs()
         var target = pos + 1
         if (target >= order.size) {
             if (!canWrap) {
@@ -325,6 +326,24 @@ class PlaybackService : MediaSessionService() {
     /** 목록 끝에서 다시 처음으로 돌아갈 수 있는지 (전체 반복 또는 무한 재생) */
     private val canWrap: Boolean
         get() = infinite || repeatMode == "all"
+
+    /**
+     * 저장된 설정을 메모리 값에 다시 반영한다.
+     * (화면에서 설정을 바꿨는데 메모리 값이 어긋나면 동작이 틀어지므로,
+     *  곡 전환/목록 끝 같은 결정적인 순간에 한 번씩 맞춘다)
+     */
+    private fun syncSettingsFromPrefs() {
+        try {
+            val r = Prefs.repeat
+            val i = Prefs.infinite
+            if (r != repeatMode || i != infinite) {
+                repeatMode = r
+                infinite = i
+                applyPlayerRepeat()
+            }
+        } catch (_: Exception) {
+        }
+    }
 
     fun prev() {
         val p = player ?: return
@@ -606,6 +625,7 @@ class PlaybackService : MediaSessionService() {
 
     private suspend fun fillOnce() {
         val p = player ?: return
+        syncSettingsFromPrefs()
         val gen = generation
         // 뒤로 지나간 항목은 제거하되, 직전 곡 1개는 남긴다
         // (차량/알림의 "이전 곡" 버튼이 동작하도록)
@@ -766,6 +786,19 @@ class PlaybackService : MediaSessionService() {
         if (next != lastState) {
             lastState = next
             PlayerBus.publish(next)
+        }
+        // 워치독 스택 덤프에 남길 한 줄 요약
+        PlayerBus.stateLine = buildString {
+            append("설정반복=").append(repeatMode)
+            append(" 무한=").append(infinite)
+            append(" pos=").append(pos)
+            append("/").append(order.size)
+            append(" 큐=").append(p?.mediaItemCount ?: -1)
+            append(" 시작=").append(windowStart)
+            append(" 상태=").append(p?.playbackState ?: -1)
+            append(" 플레이어반복=").append(p?.repeatMode ?: -1)
+            append(" 재생=").append(p?.isPlaying == true)
+            append(" 버전=").append(org.music.infiniteplayer.core.CrashLog.BuildInfo.VERSION)
         }
         PlayerBus.publishTick(
             PlaybackTick(
@@ -1080,6 +1113,7 @@ class PlaybackService : MediaSessionService() {
                 return
             }
             // 플레이어 재생목록의 끝까지 왔다 (미리 채우지 못한 경우 포함)
+            syncSettingsFromPrefs()
             when (repeatMode) {
                 "one" -> {
                     // 한 곡 반복 (플레이어 반복모드가 처리하지만 안전장치)

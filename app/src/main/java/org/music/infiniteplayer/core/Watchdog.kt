@@ -60,7 +60,9 @@ object Watchdog {
         try {
             val main = Looper.getMainLooper().thread
             val stack = main.stackTrace.joinToString("\n") { "    at $it" }
-            val text = "$title\n스레드 상태: ${main.state}\n$stack"
+            val state = org.music.infiniteplayer.playback.PlayerBus.stateLine
+            val head = if (state.isBlank()) "" else "\n[상태] $state"
+            val text = "$title$head\n스레드 상태: ${main.state}\n$stack"
             synchronized(dumps) {
                 dumps.addLast(text)
                 while (dumps.size > DUMP_COUNT) dumps.removeFirst()
