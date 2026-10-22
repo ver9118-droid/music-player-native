@@ -987,6 +987,7 @@ class PlaybackService : MediaSessionService() {
 
         override fun onPlayerError(error: PlaybackException) {
             val desc = describeError(error)
+            runCatching { org.music.infiniteplayer.core.CrashLog.save(error) }
             val p = player
             val duration = p?.duration ?: 0L
             val position = p?.currentPosition ?: 0L
@@ -1380,7 +1381,19 @@ class PlaybackService : MediaSessionService() {
             if (cause is java.net.UnknownHostException) return "DNS 실패"
             cause = cause.cause
         }
-        return error.errorCodeName
+        // 원인을 특정하지 못하면 예외 이름/메시지를 함께 남긴다 (다음 진단용)
+        val cause = error.cause
+        if (cause == null) return error.errorCodeName
+        val message = cause.message
+        return buildString {
+            append(error.errorCodeName)
+            append(" · ")
+            append(cause.javaClass.simpleName)
+            if (!message.isNullOrBlank()) {
+                append(": ")
+                append(message.take(60))
+            }
+        }
     }
 }
 

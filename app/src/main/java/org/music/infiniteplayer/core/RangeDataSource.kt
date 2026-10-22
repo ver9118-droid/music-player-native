@@ -114,7 +114,8 @@ object StreamRange {
             }
             val code = conn.responseCode
             lastHttpCode = code
-            if (code == 200 || code == 206) return conn
+            // 206(부분) 만 정상. 200 은 전체 응답이므로 중간 위치 요청에는 쓸 수 없다.
+            if (code == 206 || (code == 200 && start == 0L)) return conn
             conn.disconnect()
             return null
         } catch (_: Exception) {
@@ -142,6 +143,7 @@ class RangeDataSource : DataSource {
     private var currentSpec: DataSpec? = null
     private var totalLength: Long = StreamRange.LENGTH_UNSET
     private var bytesRemaining: Long = 0
+    private var absolutePosition: Long = 0
     private var responseHeaders: Map<String, List<String>> = emptyMap()
 
     override fun addTransferListener(transferListener: TransferListener) {
@@ -161,10 +163,11 @@ class RangeDataSource : DataSource {
         if (known > 0 && dataSpec.position >= known) {
             connection = null
             totalLength = known
+            absolutePosition = dataSpec.position
             bytesRemaining = 0
             responseHeaders = emptyMap()
             transferListener?.onTransferStart(this, dataSpec, true)
-            return 0
+            return C.LENGTH_UNSET
         }
 
         val (conn, total) = StreamRange.open(url, dataSpec.position, dataSpec.length)
@@ -188,34 +191,47 @@ class RangeDataSource : DataSource {
         }
 
         bytesRemaining = remaining
+        absolutePosition = dataSpec.position
         responseHeaders = conn.headerFields?.filterKeys { it != null } ?: emptyMap()
         transferListener?.onTransferStart(this, dataSpec, true)
-        // 중요: DataSource.open() 은 "지금부터 읽을 수 있는 남은 바이트 수"를 돌려줘야 한다.
-        // 전체 길이(totalLength)를 돌려주면 ExoPlayer 가 남은 양을 잘못 계산해서
-        // 파일 끝을 넘는 Range 를 요청하고, 유튜브가 403 을 주면서
-        // ERROR_CODE_IO_UNSPECIFIED 로 곡이 멈춘다.
-        return remaining
+        // 길이를 "모른다"고 알려준다(-1).
+        // 숫자를 주면 ExoPlayer 가 그 만큼을 반드시 읽어야 하는 양으로 기대하고,
+        // 유튜브가 곡 끝에서 연결을 먼저 끊으면 IO 오류로 처리해 재생이 멈춘다.
+        // 길이 미지정이면 스트림이 끝나는 지점을 정상 종료로 본다.
+        return C.LENGTH_UNSET
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        // 남은 길이를 넘겨 읽지 않는다 (넘기면 서버가 403 → IO 오류)
         if (bytesRemaining == 0L) {
             currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
             return C.RESULT_END_OF_INPUT
         }
-        val conn = connection ?: throw IOException("닫힌 데이터 소스")
+        val conn = connection ?: return C.RESULT_END_OF_INPUT
         val want = if (bytesRemaining > 0 && bytesRemaining < length) {
             bytesRemaining.toInt()
         } else {
             length
         }
-        val n = conn.inputStream.read(buffer, offset, want)
+        val n = try {
+            conn.inputStream.read(buffer, offset, want)
+        } catch (e: IOException) {
+            // 곡 끝부분(마지막 512KB)에서 연결이 끊기면 정상 종료로 본다.
+            // (유튜브는 마지막 바이트를 보낸 뒤 연결을 바로 닫는다)
+            val left = if (totalLength > 0) totalLength - absolutePosition else Long.MAX_VALUE
+            if (left <= 512 * 1024) {
+                bytesRemaining = 0
+                currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
+                return C.RESULT_END_OF_INPUT
+            }
+            throw e
+        }
         if (n == -1) {
             bytesRemaining = 0
             currentSpec?.let { transferListener?.onTransferEnd(this, it, true) }
             return C.RESULT_END_OF_INPUT
         }
-        bytesRemaining -= n
+        absolutePosition += n
+        if (bytesRemaining > 0) bytesRemaining -= n
         currentSpec?.let { transferListener?.onBytesTransferred(this, it, true, n) }
         return n
     }
