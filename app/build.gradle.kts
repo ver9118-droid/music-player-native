@@ -15,8 +15,8 @@ android {
         applicationId = "org.music.infiniteplayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 48
-        versionName = "2.9.6"
+        versionCode = 49
+        versionName = "2.9.7"
         resourceConfigurations += setOf("ko", "en")
     }
 
@@ -38,10 +38,12 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
-            // 난독화를 끈다 : 오류가 나면 스택에 실제 클래스 이름이 남아
-            // 원인을 정확히 알 수 있다. (APK 크기는 조금 커짐)
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // 크기 줄이기(R8)를 켠다.
+            //  - 앱 코드(org.music.infiniteplayer.**)는 proguard-rules.pro 에서
+            //    "이름 유지"로 지정했으므로 스택에는 실제 클래스 이름이 그대로 남는다
+            //  - 라이브러리(Compose/Media3 등)만 축소·최적화된다
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -107,6 +109,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
+
 
 
 
