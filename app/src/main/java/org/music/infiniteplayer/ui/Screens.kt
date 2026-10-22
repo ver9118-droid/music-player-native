@@ -68,6 +68,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +82,7 @@ import org.music.infiniteplayer.data.LyricLine
 import org.music.infiniteplayer.data.Source
 import org.music.infiniteplayer.data.Sources
 import org.music.infiniteplayer.data.Track
+import org.music.infiniteplayer.core.Storage
 import org.music.infiniteplayer.playback.Diagnostics
 import org.music.infiniteplayer.playback.PlaybackTick
 import org.music.infiniteplayer.playback.PlayerState
@@ -1267,6 +1269,37 @@ fun SettingsScreen(
             }
 
             item {
+                val ctx = LocalContext.current
+                var cacheText by remember { mutableStateOf(Storage.cacheSizeText(ctx)) }
+                var logText by remember { mutableStateOf(Storage.logSizeText(ctx)) }
+                SectionTitle("저장공간")
+                SettingRow(
+                    title = "캐시 비우기",
+                    subtitle = "썸네일·임시 파일 · 현재 $cacheText",
+                ) {
+                    StorageButton("비우기") {
+                        Storage.clearCaches(ctx)
+                        cacheText = Storage.cacheSizeText(ctx)
+                        android.widget.Toast.makeText(
+                            ctx, "캐시를 비웠습니다", android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+                SettingRow(
+                    title = "기록 삭제",
+                    subtitle = "오류·스택 덤프 기록 · 현재 $logText",
+                ) {
+                    StorageButton("삭제") {
+                        Storage.clearLogs(ctx)
+                        logText = Storage.logSizeText(ctx)
+                        android.widget.Toast.makeText(
+                            ctx, "기록을 삭제했습니다", android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            }
+
+            item {
                 SectionTitle("재생 진단")
                 SettingRow(
                     title = "진단 정보 보기",
@@ -1298,6 +1331,19 @@ fun SettingsScreen(
                 VSpace(30.dp)
             }
         }
+    }
+}
+
+@Composable
+private fun StorageButton(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Surface2)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(text, color = Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
     }
 }
 

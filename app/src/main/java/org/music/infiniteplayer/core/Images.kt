@@ -41,6 +41,14 @@ object Images {
         return File(thumbDir, hash(url) + ".jpg")
     }
 
+    /** 메모리 캐시 비우기 (디스크 캐시는 Storage 가 정리한다) */
+    fun clearMemory() {
+        try {
+            memory.evictAll()
+        } catch (_: Exception) {
+        }
+    }
+
     /** 네트워크에서 받아서 디스크+메모리에 캐시하고 경로를 돌려준다. */
     suspend fun cacheRemote(url: String): File? = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext null
