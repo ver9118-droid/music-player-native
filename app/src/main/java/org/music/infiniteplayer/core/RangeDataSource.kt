@@ -167,7 +167,7 @@ class RangeDataSource : DataSource {
             bytesRemaining = 0
             responseHeaders = emptyMap()
             transferListener?.onTransferStart(this, dataSpec, true)
-            return C.LENGTH_UNSET
+            return StreamRange.LENGTH_UNSET
         }
 
         val (conn, total) = StreamRange.open(url, dataSpec.position, dataSpec.length)
@@ -198,7 +198,7 @@ class RangeDataSource : DataSource {
         // 숫자를 주면 ExoPlayer 가 그 만큼을 반드시 읽어야 하는 양으로 기대하고,
         // 유튜브가 곡 끝에서 연결을 먼저 끊으면 IO 오류로 처리해 재생이 멈춘다.
         // 길이 미지정이면 스트림이 끝나는 지점을 정상 종료로 본다.
-        return C.LENGTH_UNSET
+        return StreamRange.LENGTH_UNSET
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
@@ -255,3 +255,4 @@ class RangeDataSource : DataSource {
         override fun createDataSource(): DataSource = RangeDataSource()
     }
 }
+

@@ -1382,13 +1382,13 @@ class PlaybackService : MediaSessionService() {
             cause = cause.cause
         }
         // 원인을 특정하지 못하면 예외 이름/메시지를 함께 남긴다 (다음 진단용)
-        val cause = error.cause
-        if (cause == null) return error.errorCodeName
-        val message = cause.message
+        val rootCause = error.cause
+        if (rootCause == null) return error.errorCodeName
+        val message = rootCause.message
         return buildString {
             append(error.errorCodeName)
             append(" · ")
-            append(cause.javaClass.simpleName)
+            append(rootCause.javaClass.simpleName)
             if (!message.isNullOrBlank()) {
                 append(": ")
                 append(message.take(60))
