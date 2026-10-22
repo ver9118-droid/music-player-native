@@ -95,6 +95,16 @@ class PlaybackService : MediaSessionService() {
     /** 목록 끝까지 다 재생하고 멈춘 상태 (▶ 누르면 처음 곡부터 다시) */
     private var endedAtList = false
 
+    /**
+     * "반복 없음 + 무한재생 끔" = 지금 곡 하나만 재생하고 정지.
+     *
+     * 무한재생이 켜져 있으면 반복 없음은 무시된다(계속 재생).
+     * 이 모드에서는 플레이어 큐에 다음 곡을 붙이지 않으므로
+     * 곡이 끝나면 자동으로 다음 곡이 시작되지 않는다.
+     */
+    private val singleShot: Boolean
+        get() = !infinite && repeatMode == "off"
+
     private var currentEntry: Entry? = null
     private var userWantsPlay = false
     private var callPaused = false
@@ -320,7 +330,9 @@ class PlaybackService : MediaSessionService() {
         val target = pos + 1
         if (target >= order.size) {
             if (!canWrap) {
-                stopPlayback()
+                // 목록 마지막 곡에서 "다음"을 누른 경우 → 정지
+                // (한 곡만 재생 모드라면 같은 곡을 다시 재생할 수 있게 표시하지 않는다)
+                stopPlayback(atListEnd = !singleShot)
                 return
             }
             // 목록 끝 → 처음 곡으로 (재생순서를 늘리지 않는다)
@@ -347,9 +359,24 @@ class PlaybackService : MediaSessionService() {
                 repeatMode = r
                 infinite = i
                 applyPlayerRepeat()
+                trimQueueToCurrent()
+                fillWindow()
             }
         } catch (_: Exception) {
         }
+    }
+
+    /**
+     * "이 곡만 재생" 모드에서는 현재 곡 뒤에 미리 붙여둔 다음 곡을 제거한다.
+     * (큐에 다음 곡이 남아 있으면 곡이 끝날 때 자동으로 넘어가 버린다)
+     */
+    private fun trimQueueToCurrent() {
+        if (!singleShot) return
+        val p = player ?: return
+        val idx = p.currentMediaItemIndex
+        if (idx < 0) return
+        if (p.mediaItemCount <= idx + 1) return
+        runCatching { p.removeMediaItems(idx + 1, p.mediaItemCount) }
     }
 
     fun prev() {
@@ -404,12 +431,16 @@ class PlaybackService : MediaSessionService() {
         repeatMode = mode
         Prefs.repeat = mode
         applyPlayerRepeat()
+        // 한 곡만 재생 모드로 바뀌면 미리 붙여둔 다음 곡을 큐에서 뺀다
+        trimQueueToCurrent()
+        // 그 반대(전체/한곡/무한재생)로 바뀌면 다음 곡을 다시 미리 준비한다
+        fillWindow()
         // 설정이 실제로 적용됐는지 눈으로 확인할 수 있게 알려준다
         toast(
             when (mode) {
                 "all" -> "반복: 전체"
                 "one" -> "반복: 한 곡"
-                else -> "반복: 끔"
+                else -> if (infinite) "반복: 끔 (무한재생 켜짐 → 계속 재생)" else "반복: 끔 (이 곡만 재생)"
             }
         )
         publish()
@@ -431,14 +462,23 @@ class PlaybackService : MediaSessionService() {
     fun setInfinite(enabled: Boolean) {
         infinite = enabled
         Prefs.infinite = enabled
-        toast(if (enabled) "무한 재생: 켬" else "무한 재생: 끔")
+        // 무한재생을 끄고 반복도 꺼져 있으면 "이 곡만 재생" 모드가 된다
+        trimQueueToCurrent()
+        fillWindow()
+        toast(
+            if (enabled) "무한 재생: 켬 (계속 재생)"
+            else if (repeatMode == "off") "무한 재생: 끔 (이 곡만 재생)"
+            else "무한 재생: 끔"
+        )
         publish()
     }
 
-    fun stopPlayback() {
+    fun stopPlayback(atListEnd: Boolean = false) {
         val p = player ?: return
         userWantsPlay = false
-        endedAtList = true
+        // 목록 끝(마지막 곡 뒤)에서 멈춘 경우에만 "처음 곡부터 다시" 대상으로 표시한다.
+        // 한 곡만 재생 모드에서 멈춘 경우는 같은 곡을 다시 재생해야 한다.
+        endedAtList = atListEnd
         p.pause()
         p.stop()
         statusText = "정지"
@@ -596,6 +636,11 @@ class PlaybackService : MediaSessionService() {
     private suspend fun fillOnce() {
         val p = player ?: return
         syncSettingsFromPrefs()
+        // "이 곡만 재생" 모드 : 다음 곡을 미리 붙이지 않는다 (끝나면 정지)
+        if (singleShot) {
+            trimQueueToCurrent()
+            return
+        }
         val gen = generation
         // 뒤로 지나간 항목은 제거하되, 직전 곡 1개는 남긴다
         // (차량/알림의 "이전 곡" 버튼이 동작하도록)
@@ -760,6 +805,7 @@ class PlaybackService : MediaSessionService() {
         PlayerBus.stateLine = buildString {
             append("설정반복=").append(repeatMode)
             append(" 무한=").append(infinite)
+            append(" 한곡만=").append(singleShot)
             append(" pos=").append(pos)
             append("/").append(order.size)
             append(" 큐=").append(p?.mediaItemCount ?: -1)
@@ -1096,8 +1142,14 @@ class PlaybackService : MediaSessionService() {
                     // 위치 계산 없이 그대로 정지한다. (인덱스가 어긋나도 안전)
                     if (!canWrap) {
                         userWantsPlay = false
-                        endedAtList = true
-                        statusText = "재생 종료 (목록 끝)"
+                        if (singleShot) {
+                            // 한 곡만 재생 모드 : 같은 곡을 다시 들을 수 있게 표시
+                            endedAtList = false
+                            statusText = "재생 종료 (한 곡)"
+                        } else {
+                            endedAtList = true
+                            statusText = "재생 종료 (목록 끝)"
+                        }
                         // 끝난 상태에서도 ▶ 를 누르면 다시 재생되도록 정리
                         runCatching { player?.pause() }
                     } else {
@@ -1138,6 +1190,15 @@ class PlaybackService : MediaSessionService() {
                         p?.play()
                     }
                     startTicker()
+                    return
+                }
+                // 한 곡만 재생 모드 : 다음 곡으로 넘어가지 않고 그대로 정지
+                if (singleShot) {
+                    streamProbe = "끝부분 오류($desc) → 곡 끝(정지)"
+                    userWantsPlay = false
+                    endedAtList = false
+                    statusText = "재생 종료 (한 곡)"
+                    publish()
                     return
                 }
                 streamProbe = "끝부분 오류($desc) → 다음 곡"
