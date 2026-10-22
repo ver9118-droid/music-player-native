@@ -399,10 +399,18 @@ class PlaybackService : MediaSessionService() {
     private fun rebuildOrder(startIndex: Int) {
         generation++
         order.clear()
-        order.add(startIndex)
-        val rest = (0 until entries.size).filter { it != startIndex }.toMutableList()
-        if (shuffleOn) rest.shuffle(Random(System.nanoTime()))
-        order.addAll(rest)
+        if (shuffleOn) {
+            // 셔플 : 고른 곡 뒤로 나머지를 무작위로
+            order.add(startIndex)
+            val rest = (0 until entries.size).filter { it != startIndex }.toMutableList()
+            rest.shuffle(Random(System.nanoTime()))
+            order.addAll(rest)
+        } else {
+            // 셔플 아님 : 고른 곡부터 목록 "끝까지 순서대로"
+            // (예전에는 고른 곡 다음이 목록 0번이라, 곡이 끝나면
+            //  차트 첫 번째 곡으로 튀어버렸다)
+            for (i in startIndex.coerceAtLeast(0) until entries.size) order.add(i)
+        }
         windowStart = 0
         pos = -1
     }
