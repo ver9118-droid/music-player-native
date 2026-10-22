@@ -88,9 +88,6 @@ class PlaybackService : MediaSessionService() {
     /** 현재 재생 위치 (order 기준) */
     private var pos = -1
 
-    /** appendPermutation() 으로 뒤에 붙인 "다음 바퀴" 묶음 수 (반복 끄면 잘라낸다) */
-    private var appendedRounds = 0
-
     /** 연속으로 곡 재생에 실패한 횟수 (실패 폭주 시 무한 스킵 방지) */
     private var consecutiveFailures = 0
     private var lastFailureAt = 0L
@@ -311,14 +308,15 @@ class PlaybackService : MediaSessionService() {
     fun next() {
         if (order.isEmpty()) return
         syncSettingsFromPrefs()
-        var target = pos + 1
+        val target = pos + 1
         if (target >= order.size) {
             if (!canWrap) {
                 stopPlayback()
                 return
             }
-            appendPermutation()
-            target = pos + 1
+            // 목록 끝 → 처음 곡으로 (재생순서를 늘리지 않는다)
+            jumpTo(0, autoPlay = true)
+            return
         }
         jumpTo(target.coerceAtMost(order.size - 1), autoPlay = true)
     }
@@ -397,7 +395,6 @@ class PlaybackService : MediaSessionService() {
         repeatMode = mode
         Prefs.repeat = mode
         applyPlayerRepeat()
-        trimWrapTail()
         // 설정이 실제로 적용됐는지 눈으로 확인할 수 있게 알려준다
         toast(
             when (mode) {
@@ -425,7 +422,6 @@ class PlaybackService : MediaSessionService() {
     fun setInfinite(enabled: Boolean) {
         infinite = enabled
         Prefs.infinite = enabled
-        trimWrapTail()
         toast(if (enabled) "무한 재생: 켬" else "무한 재생: 끔")
         publish()
     }
@@ -457,43 +453,6 @@ class PlaybackService : MediaSessionService() {
         }
         windowStart = 0
         pos = -1
-        appendedRounds = 0
-    }
-
-    private fun appendPermutation() {
-        if (entries.isEmpty()) return
-        val list = (0 until entries.size).toMutableList()
-        if (shuffleOn) list.shuffle(Random(System.nanoTime()))
-        order.addAll(list)
-        appendedRounds++
-    }
-
-    /**
-     * 반복/무한재생을 끄면 미리 붙여둔 "다음 바퀴" 항목을 잘라낸다.
-     *
-     * 잘라내지 않으면 목록 마지막 곡 뒤에 1번 곡이 이어져 있어서
-     * 반복을 껐는데도 계속 재생되는 것처럼 보인다.
-     */
-    private fun trimWrapTail() {
-        if (canWrap || appendedRounds <= 0 || entries.isEmpty()) return
-        val perRound = entries.size
-        val keep = order.size - appendedRounds * perRound
-        // 이미 다음 바퀴로 넘어와 재생 중이면 건드리지 않는다
-        if (keep <= 0 || pos >= keep) return
-        while (order.size > keep) order.removeAt(order.size - 1)
-        appendedRounds = 0
-
-        val p = player ?: return
-        // 현재 곡 뒤쪽의 "다음 바퀴" 항목을 플레이어 큐에서도 제거
-        val firstRemove = maxOf(keep, pos + 1) - windowStart
-        if (firstRemove in 0 until p.mediaItemCount) {
-            try {
-                p.removeMediaItems(firstRemove, p.mediaItemCount)
-            } catch (_: Exception) {
-                return
-            }
-            fillWindow()
-        }
     }
 
     /**
@@ -641,10 +600,9 @@ class PlaybackService : MediaSessionService() {
         while (added < 2 && currentCoroutineContext().isActive) {
             if (gen != generation) return   // 재생목록이 바뀌었으면 중단
             val wantPos = windowStart + p.mediaItemCount
-            if (wantPos >= order.size) {
-                if (!canWrap) break
-                appendPermutation()
-            }
+            // 재생순서를 늘리지 않는다. 목록 끝이면 더 붙이지 않는다.
+            // (늘려 붙이면 "반복 끄기"에서도 끝없이 다음 곡이 이어진다)
+            if (wantPos >= order.size) break
             val entry = entries.getOrNull(order.getOrNull(wantPos) ?: -1) ?: break
             val audio = entry.audio ?: resolveEntry(entry) ?: break
             if (gen != generation) return
