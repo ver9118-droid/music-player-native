@@ -8,9 +8,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- 통화 중 음원 중복 방지를 위한 전화 상태 감지 (거부해도 오디오 포커스로 동작) -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <!-- Android 9 이하에서만 음악 라이브러리/벨소리 저장에 필요 -->
+    <!-- 통화 중 일시정지는 오디오 포커스로 처리한다.
+         (READ_PHONE_STATE 는 민감 권한이라 백신/Play 프로텍트 오탐 우려가 있어 제거)
+         Android 9 이하에서만 음악 라이브러리/벨소리 저장에 필요 -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />

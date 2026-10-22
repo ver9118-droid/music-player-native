@@ -15,8 +15,8 @@ android {
         applicationId = "org.music.infiniteplayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 51
-        versionName = "2.9.9"
+        versionCode = 52
+        versionName = "2.9.10"
         resourceConfigurations += setOf("ko", "en")
     }
 
@@ -38,12 +38,11 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
-            // 크기 줄이기(R8)를 켠다.
-            //  - 앱 코드(org.music.infiniteplayer.**)는 proguard-rules.pro 에서
-            //    "이름 유지"로 지정했으므로 스택에는 실제 클래스 이름이 그대로 남는다
-            //  - 라이브러리(Compose/Media3 등)만 축소·최적화된다
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // v2.9.7~2.9.8 에서 R8 축소를 켰더니 스트리밍 해석이 실패했다
+            // ("모든 곡을 찾을 수 없습니다") → 기능 우선으로 다시 끈다.
+            // (크기 최적화는 별도 검증 후 재시도)
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -109,6 +108,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
+
 
 
 
