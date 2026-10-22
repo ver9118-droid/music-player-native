@@ -286,6 +286,13 @@ class PlaybackService : MediaSessionService() {
                 playTrack(0)
                 return
             }
+            // 목록 끝에서 stop() 된 경우(STATE_IDLE)에는 prepare() 부터 다시 해야 한다.
+            // 끝까지 재생돼 멈춘 경우(STATE_ENDED)에는 처음 위치로 되감아야 한다.
+            // 그냥 play() 만 하면 아무 일도 일어나지 않아 버튼이 죽은 것처럼 보인다.
+            when (p.playbackState) {
+                Player.STATE_IDLE -> runCatching { p.prepare() }
+                Player.STATE_ENDED -> runCatching { p.seekTo(0) }
+            }
             userWantsPlay = true
             statusText = "재생 중"
             p.play()
@@ -645,9 +652,12 @@ class PlaybackService : MediaSessionService() {
                             Prefs.playbackPosition = p.currentPosition
                             Prefs.playbackPlaying = p.isPlaying
                             // 목록 인덱스로 저장 (복원 시 order 가 아니라 목록 기준)
-                            Prefs.playbackIndex = entries.indexOfFirst {
+                            // 찾지 못했을 때 0 으로 덮어쓰면, 서비스가 다시 살아날 때
+                            // 엉뚱하게 목록 첫 곡부터 재생되므로 저장하지 않는다.
+                            val listIndex = entries.indexOfFirst {
                                 it.track.id == currentEntry?.track?.id
-                            }.coerceAtLeast(0)
+                            }
+                            if (listIndex >= 0) Prefs.playbackIndex = listIndex
                         }
                     } catch (_: Exception) {
                     }
@@ -983,6 +993,8 @@ class PlaybackService : MediaSessionService() {
                     if (pos + 1 >= order.size && !canWrap) {
                         userWantsPlay = false
                         statusText = "재생 종료"
+                        // 끝난 상태에서도 ▶ 를 누르면 다시 재생되도록 정리
+                        runCatching { player?.pause() }
                     } else {
                         // 정확히 "다음 1곡"만 이동 (중복 이동 금지)
                         statusText = "다음 곡 준비 중..."
