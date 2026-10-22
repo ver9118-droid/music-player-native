@@ -105,6 +105,9 @@ fun HomeScreen(
     searching: Boolean,
     crashLog: String,
     freezeDetected: Boolean,
+    favorites: List<Track>,
+    onPlayFavorite: (Track) -> Unit,
+    onPlayAllFavorites: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onQueryChange: (String) -> Unit,
     onSearchSubmit: () -> Unit,
@@ -149,6 +152,13 @@ fun HomeScreen(
                 Icon(Icons.Rounded.Settings, "설정", tint = TextSecondary)
             }
         }
+
+        // 즐겨찾기 바로가기 (메인 화면 상단)
+        FavoritesStrip(
+            favorites = favorites,
+            onPlayFavorite = onPlayFavorite,
+            onPlayAll = onPlayAllFavorites,
+        )
 
         // 직전 실행에서 발생한 오류 안내
         if (crashLog.isNotBlank() || freezeDetected) {
@@ -282,6 +292,94 @@ fun HomeScreen(
         // 미니 플레이어
         AnimatedVisibility(visible = state.title.isNotBlank()) {
             MiniPlayer(state = state, onOpen = onOpenPlayer)
+        }
+    }
+}
+
+/**
+ * 메인 화면 상단 "즐겨찾기" 바로가기.
+ *
+ * 설정 화면까지 들어가지 않고도 즐겨찾기한 곡을 바로 재생할 수 있게 한다.
+ * (가로 스크롤 카드 · 누르면 그 곡부터 즐겨찾기 목록 전체가 재생된다)
+ */
+@Composable
+private fun FavoritesStrip(
+    favorites: List<Track>,
+    onPlayFavorite: (Track) -> Unit,
+    onPlayAll: () -> Unit,
+) {
+    if (favorites.isEmpty()) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.Favorite,
+                null,
+                tint = Accent,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "즐겨찾기",
+                color = TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = "${favorites.size}곡",
+                color = TextSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Accent.copy(alpha = 0.18f))
+                    .clickable(onClick = onPlayAll)
+                    .padding(horizontal = 11.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    "전체 재생",
+                    color = Accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        LazyRow(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(favorites, key = { t -> t.id }) { track ->
+                Column(
+                    modifier = Modifier
+                        .width(70.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .clickable { onPlayFavorite(track) }
+                        .padding(bottom = 2.dp),
+                ) {
+                    Artwork(url = track.thumbUrl, size = 66.dp, corner = 11.dp)
+                    Text(
+                        text = track.title,
+                        color = TextPrimary,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp, start = 1.dp, end = 1.dp),
+                    )
+                }
+            }
         }
     }
 }

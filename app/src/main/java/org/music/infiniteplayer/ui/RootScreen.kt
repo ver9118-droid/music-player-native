@@ -127,6 +127,18 @@ fun RootScreen() {
         }
     }
 
+    // 즐겨찾기 곡 재생 : 누른 곡부터 즐겨찾기 목록 전체를 재생
+    val playFavorite: (Track) -> Unit = { track ->
+        val list = favorites
+        val idx = list.indexOfFirst { it.id == track.id }
+        if (list.isEmpty()) {
+            PlayerBus.post { it.setQueue(listOf(track), 0) }
+        } else {
+            PlayerBus.post { it.setQueue(list, if (idx < 0) 0 else idx) }
+        }
+        page = PAGE_PLAYER
+    }
+
     // 상태바/네비게이션바 영역과 겹치지 않도록 inset 적용
     Box(
         modifier = Modifier
@@ -179,18 +191,7 @@ fun RootScreen() {
                     Prefs.toggleFavoriteTrack(track.toJson())
                     favorites = loadFavorites()
                 },
-                onPlayFavorite = { track ->
-                    // 즐겨찾기는 "누른 곡만" 이 아니라 즐겨찾기 목록 전체를
-                    // 그 곡부터 재생한다. (1곡만 넣으면 다음 곡/전체 반복이 의미가 없다)
-                    val list = favorites
-                    val idx = list.indexOfFirst { it.id == track.id }
-                    if (list.isEmpty()) {
-                        PlayerBus.post { it.setQueue(listOf(track), 0) }
-                    } else {
-                        PlayerBus.post { it.setQueue(list, if (idx < 0) 0 else idx) }
-                    }
-                    page = PAGE_PLAYER
-                },
+                onPlayFavorite = playFavorite,
             )
 
             PAGE_DIAG -> DiagnosticsScreen(
@@ -214,6 +215,14 @@ fun RootScreen() {
                     searching = searching,
                     crashLog = crashLog,
                     freezeDetected = freezeDetected,
+                    favorites = favorites,
+                    onPlayFavorite = playFavorite,
+                    onPlayAllFavorites = {
+                        if (favorites.isNotEmpty()) {
+                            PlayerBus.post { it.setQueue(favorites, 0) }
+                            page = PAGE_PLAYER
+                        }
+                    },
                     onOpenDiagnostics = { page = PAGE_DIAG },
                     onQueryChange = { q ->
                         searchQuery = q
