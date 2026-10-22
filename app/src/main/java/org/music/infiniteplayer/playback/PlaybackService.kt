@@ -1130,8 +1130,8 @@ class PlaybackService : MediaSessionService() {
                     userWantsPlay = true
                     publish()
                     runCatching {
-                        p.seekTo(0)
-                        p.play()
+                        p?.seekTo(0)
+                        p?.play()
                     }
                     startTicker()
                     return
