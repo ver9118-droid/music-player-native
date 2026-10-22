@@ -1177,8 +1177,28 @@ class PlaybackService : MediaSessionService() {
         val entry = currentEntry ?: return
         val p = player ?: return
         if (retryCount >= 3) {
-            errorText = "재생 오류 ($desc) · 재시도 실패"
-            publish()
+            // 복구 시도(주소 재해석·다른 포맷·파일 재생)를 모두 실패했다.
+            // 여기서 멈추면 앱이 죽은 것처럼 보이므로 다음 곡으로 넘어간다.
+            retryCount = 0
+            entry.audio = null
+            entry.job = null
+            if (entries.size <= 1) {
+                errorText = "재생 오류 ($desc) · 재시도 실패"
+                statusText = "재생 실패"
+                publish()
+                return
+            }
+            errorText = "재생 오류 ($desc) · 이 곡을 건너뜁니다"
+            toast("'${entry.track.title}' 재생 실패 → 다음 곡")
+            val failedId = entry.track.id
+            scope.launch {
+                delay(1500)
+                // 그 사이 사용자가 다른 곡을 골랐으면 건너뛰지 않는다
+                if (currentEntry?.track?.id == failedId) {
+                    errorText = ""
+                    next()
+                }
+            }
             return
         }
         retryCount++
@@ -1271,6 +1291,18 @@ class PlaybackService : MediaSessionService() {
             if (!res.ok) {
                 errorText = "음원 내려받기에 실패했습니다 (${res.error})"
                 publish()
+                // 여기서 멈추면 앱이 멈춘 것처럼 보인다 → 다음 곡으로
+                if (entries.size > 1) {
+                    toast("'${entry.track.title}' 재생 실패 → 다음 곡")
+                    val failedId = entry.track.id
+                    scope.launch {
+                        delay(1500)
+                        if (currentEntry?.track?.id == failedId) {
+                            errorText = ""
+                            next()
+                        }
+                    }
+                }
                 return@launch
             }
             entry.localFile = dest
@@ -1289,9 +1321,9 @@ class PlaybackService : MediaSessionService() {
         val orderPos = order.indexOf(entryIdx)
         if (orderPos >= 0) pos = orderPos
         windowStart = if (orderPos >= 0) orderPos else 0
+        currentEntry = entry
         p.setMediaItems(items, 0, 0L)
         p.prepare()
-        currentEntry = entry
         userWantsPlay = true
         p.play()
         startTicker()
