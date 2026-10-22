@@ -667,7 +667,6 @@ fun NowPlayingScreen(
                 color = if (state.error.isNotBlank()) Danger else AccentSoft,
             )
             if (state.infinite) StatusChip("무한 재생", Accent)
-            if (!state.infinite && state.repeat == "off") StatusChip("이 곡만 재생", AccentSoft)
             if (state.callActive) StatusChip("통화 중", Danger)
             if (diag.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
         }
@@ -1044,7 +1043,7 @@ fun SettingsScreen(
                 SectionTitle("재생")
                 SettingRow(
                     title = "무한 재생",
-                    subtitle = "켜면 반복 설정과 상관없이 목록이 끝나도 계속 재생합니다",
+                    subtitle = "목록 끝(마지막 곡)에서 처음 곡으로 이어서 재생합니다",
                 ) {
                     Switch(
                         checked = state.infinite,
@@ -1070,7 +1069,7 @@ fun SettingsScreen(
                         else -> if (state.infinite) {
                             "반복 없음 · 무한재생이 켜져 있어 계속 재생"
                         } else {
-                            "반복 없음 · 지금 곡만 재생하고 정지"
+                            "반복 없음 · 목록 끝(마지막 곡)에서 정지"
                         }
                     },
                 ) {
