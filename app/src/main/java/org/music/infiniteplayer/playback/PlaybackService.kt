@@ -159,6 +159,8 @@ class PlaybackService : MediaSessionService() {
         player = exo
         exo.addListener(Listener())
         exo.volume = volume
+        // 한 곡 반복은 플레이어가 직접 처리하게 한다 (수동 seek/play 는 기기에 따라 멈춤)
+        applyPlayerRepeat()
 
         mediaSession = MediaSession.Builder(this, exo)
             .setSessionActivity(openAppIntent())
@@ -296,7 +298,7 @@ class PlaybackService : MediaSessionService() {
         if (order.isEmpty()) return
         var target = pos + 1
         if (target >= order.size) {
-            if (!infinite) {
+            if (!canWrap) {
                 stopPlayback()
                 return
             }
@@ -306,6 +308,10 @@ class PlaybackService : MediaSessionService() {
         jumpTo(target.coerceAtMost(order.size - 1), autoPlay = true)
     }
 
+    /** 목록 끝에서 다시 처음으로 돌아갈 수 있는지 (전체 반복 또는 무한 재생) */
+    private val canWrap: Boolean
+        get() = infinite || repeatMode == "all"
+
     fun prev() {
         val p = player ?: return
         if (p.currentPosition > 3_000) {
@@ -314,7 +320,13 @@ class PlaybackService : MediaSessionService() {
             return
         }
         if (order.isEmpty()) return
-        val target = if (pos - 1 >= 0) pos - 1 else if (infinite) order.size - 1 else 0
+        val target = pos - 1
+        if (target < 0) {
+            // 첫 곡이면 처음으로 되감기만 한다
+            p.seekTo(0)
+            publish()
+            return
+        }
         jumpTo(target, autoPlay = true)
     }
 
@@ -351,7 +363,21 @@ class PlaybackService : MediaSessionService() {
     fun setRepeat(mode: String) {
         repeatMode = mode
         Prefs.repeat = mode
+        applyPlayerRepeat()
         publish()
+    }
+
+    /** ExoPlayer 자체 반복 설정 (한 곡 반복 = REPEAT_MODE_ONE) */
+    private fun applyPlayerRepeat() {
+        val p = player ?: return
+        try {
+            p.repeatMode = if (repeatMode == "one") {
+                Player.REPEAT_MODE_ONE
+            } else {
+                Player.REPEAT_MODE_OFF
+            }
+        } catch (_: Exception) {
+        }
     }
 
     fun setInfinite(enabled: Boolean) {
@@ -388,6 +414,28 @@ class PlaybackService : MediaSessionService() {
         order.addAll(list)
     }
 
+    /**
+     * 곡 id 로 재생순서(order) 상의 위치를 찾는다.
+     *
+     * anchor(보통 "지금 위치 + 1")에 가장 가까운 항목을 고르므로
+     * 무한재생으로 같은 곡이 여러 번 들어있어도 정확히 다음 항목을 집는다.
+     */
+    private fun findNearestOrderIndex(id: String?, anchor: Int): Int {
+        if (id.isNullOrBlank()) return -1
+        var best = -1
+        var bestDistance = Int.MAX_VALUE
+        for (i in order.indices) {
+            val entry = entries.getOrNull(order[i]) ?: continue
+            if (entry.track.id != id) continue
+            val distance = kotlin.math.abs(i - anchor)
+            if (distance < bestDistance) {
+                bestDistance = distance
+                best = i
+            }
+        }
+        return best
+    }
+
     // ── 재생 제어 내부 ─────────────────────────────────────────
     private fun jumpTo(target: Int, autoPlay: Boolean) {
         val p = player ?: return
@@ -414,9 +462,10 @@ class PlaybackService : MediaSessionService() {
             val items = ArrayList<MediaItem>(1)
             items.add(mediaItem(entry, audio))
             windowStart = target
+            // setMediaItems 가 리스너를 부르므로 그 전에 현재 곡을 확정해 둔다
+            currentEntry = entry
             p.setMediaItems(items, 0, 0L)
             p.prepare()
-            currentEntry = entry
             if (autoPlay) {
                 userWantsPlay = true
                 p.play()
@@ -498,14 +547,17 @@ class PlaybackService : MediaSessionService() {
         val curIdx = p.currentMediaItemIndex
         if (curIdx > 1) {
             p.removeMediaItems(0, curIdx - 1)
-            windowStart += curIdx - 1
+            // 현재 곡의 order 위치는 그대로이고 플레이어 인덱스만 바뀐다.
+            // (인덱스가 바뀌는 순간 리스너가 windowStart 를 다시 계산하므로
+            //  여기서도 pos 기준으로 맞춰 둔다 → 곡이 1~2칸 밀리는 문제 방지)
+            windowStart = pos - p.currentMediaItemIndex
         }
         var added = 0
         while (added < 2 && currentCoroutineContext().isActive) {
             if (gen != generation) return   // 재생목록이 바뀌었으면 중단
             val wantPos = windowStart + p.mediaItemCount
             if (wantPos >= order.size) {
-                if (!infinite) break
+                if (!canWrap) break
                 appendPermutation()
             }
             val entry = entries.getOrNull(order.getOrNull(wantPos) ?: -1) ?: break
@@ -860,24 +912,32 @@ class PlaybackService : MediaSessionService() {
             val p = player ?: return
             val idx = p.currentMediaItemIndex
             if (idx < 0) return
-            val newPos = windowStart + idx
-            val entry = entries.getOrNull(order.getOrNull(newPos) ?: -1) ?: return
 
-            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && repeatMode == "one") {
-                // 한 곡 반복 : 방금 끝난 곡으로 되돌아가 다시 재생
-                p.seekToPreviousMediaItem()
-                p.play()
+            val id = mediaItem?.mediaId
+
+            // 1) 같은 곡인데 플레이어 인덱스만 바뀐 경우
+            //    (앞쪽 아이템을 정리하면 인덱스가 밀린다 → windowStart 를 다시 맞춘다)
+            if (id != null && currentEntry?.track?.id == id) {
+                windowStart = pos - idx
+                fillWindow()
                 return
             }
 
-            val changed = newPos != pos
-            pos = newPos
-            currentEntry = entry
-            if (changed) {
-                statusText = "재생 중"
-                errorText = ""
-                onTrackChanged(entry)
+            // 2) 곡이 바뀐 경우 : 인덱스 계산(windowStart + idx)은 목록 정리와
+            //    겹치면 1~2칸씩 밀린다. 곡 id 로 order 상의 위치를 찾는다.
+            val newPos = findNearestOrderIndex(id, pos + 1)
+            if (newPos < 0) {
+                windowStart = pos - idx
+                fillWindow()
+                return
             }
+            val entry = entries.getOrNull(order[newPos]) ?: return
+            pos = newPos
+            windowStart = pos - idx
+            currentEntry = entry
+            statusText = "재생 중"
+            errorText = ""
+            onTrackChanged(entry)
             fillWindow()
         }
 
@@ -898,24 +958,29 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED) {
-                val p = player
-                if (repeatMode == "one") {
-                    p?.seekTo(0)
-                    p?.play()
-                    return
+            if (playbackState != Player.STATE_ENDED) {
+                publish()
+                return
+            }
+            // 플레이어 재생목록의 끝까지 왔다 (미리 채우지 못한 경우 포함)
+            when (repeatMode) {
+                "one" -> {
+                    // 한 곡 반복 (플레이어 반복모드가 처리하지만 안전장치)
+                    player?.seekTo(0)
+                    player?.play()
+                    userWantsPlay = true
+                    startTicker()
                 }
-                if (infinite) {
-                    appendPermutation()
-                    scope.launch {
-                        fillOnce()
-                        player?.prepare()
-                        if (userWantsPlay) player?.play()
+                else -> {
+                    if (pos + 1 >= order.size && !canWrap) {
+                        userWantsPlay = false
+                        statusText = "재생 종료"
+                    } else {
+                        // 정확히 "다음 1곡"만 이동 (중복 이동 금지)
+                        statusText = "다음 곡 준비 중..."
+                        next()
                     }
-                    return
                 }
-                userWantsPlay = false
-                statusText = "재생 종료"
             }
             publish()
         }
