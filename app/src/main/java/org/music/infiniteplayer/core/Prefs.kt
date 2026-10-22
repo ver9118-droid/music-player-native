@@ -26,6 +26,8 @@ object Prefs {
     const val KEY_AUTOPLAY = "autoplay"
     const val KEY_SOURCE = "last_source"
     const val KEY_CHART_PREFIX = "chart_"
+    const val KEY_LAST_ERROR = "last_error"       // 최근 오류 (진단용, 지워지지 않음)
+    const val KEY_LAST_ERROR_AT = "last_error_at" // 최근 오류 시각
 
     fun init(ctx: Context) {
         if (!::sp.isInitialized) {
@@ -61,6 +63,15 @@ object Prefs {
     var lastSource: String
         get() = sp.getString(KEY_SOURCE, "") ?: ""
         set(v) = sp.edit().putString(KEY_SOURCE, v).apply()
+
+    /** 진단용 : 마지막으로 발생한 재생 오류 (앱을 다시 열어도 남는다) */
+    var lastError: String
+        get() = sp.getString(KEY_LAST_ERROR, "") ?: ""
+        set(v) = sp.edit().putString(KEY_LAST_ERROR, v).apply()
+
+    var lastErrorAt: String
+        get() = sp.getString(KEY_LAST_ERROR_AT, "") ?: ""
+        set(v) = sp.edit().putString(KEY_LAST_ERROR_AT, v).apply()
 
     /** 유튜브 방문자 ID (봇 판정 회피용) */
     var visitorData: String

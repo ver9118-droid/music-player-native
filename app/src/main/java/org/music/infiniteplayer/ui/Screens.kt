@@ -758,6 +758,8 @@ fun DiagnosticsScreen(
     val clipboard = LocalClipboardManager.current
     val crash = remember { org.music.infiniteplayer.core.CrashLog.read() }
     val stackDump = remember { org.music.infiniteplayer.core.CrashLog.readStack() }
+    val lastError = remember { org.music.infiniteplayer.core.Prefs.lastError }
+    val lastErrorAt = remember { org.music.infiniteplayer.core.Prefs.lastErrorAt }
     val report = remember(state, diag) {
         buildString {
             appendLine("무한 음악 플레이어 진단 v${org.music.infiniteplayer.core.CrashLog.BuildInfo.VERSION}")
@@ -770,6 +772,7 @@ fun DiagnosticsScreen(
             appendLine("출력 경로: ${diag.audioRoute}")
             appendLine("앱 볼륨: ${state.volume}")
             appendLine("오류: ${state.error.ifBlank { "없음" }}")
+            appendLine("최근 오류: ${lastError.ifBlank { "없음" }}${if (lastErrorAt.isBlank()) "" else " ($lastErrorAt)"}")
         }
     }
 
@@ -805,6 +808,10 @@ fun DiagnosticsScreen(
                     DiagRow("UI 응답", diag.uiLatency.ifBlank { "-" })
                     DiagRow("앱 볼륨", "%.0f%%".format(state.volume * 100))
                     DiagRow("오류", state.error.ifBlank { "없음" })
+                    DiagRow(
+                        "최근 오류",
+                        if (lastError.isBlank()) "없음" else "$lastError${if (lastErrorAt.isBlank()) "" else "  ($lastErrorAt)"}",
+                    )
                     DiagRow("최근 크래시", if (crash.isBlank()) "없음" else "있음 (아래에서 복사)")
                     DiagRow("스택 덤프", if (stackDump.isBlank()) "없음" else "있음 (아래에서 복사)")
                     if (state.downloadProgress >= 0) {

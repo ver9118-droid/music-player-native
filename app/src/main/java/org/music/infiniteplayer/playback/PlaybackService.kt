@@ -997,6 +997,9 @@ class PlaybackService : MediaSessionService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 statusText = "재생 중"
+                // 실제로 재생 중이면 지난 오류 표시는 지운다.
+                // (복구에 성공했는데도 상단에 오류가 계속 남아 있는 문제)
+                errorText = ""
                 startTicker()
             } else if (!callPaused) {
                 val p = player
@@ -1046,6 +1049,13 @@ class PlaybackService : MediaSessionService() {
         override fun onPlayerError(error: PlaybackException) {
             val desc = describeError(error)
             runCatching { org.music.infiniteplayer.core.CrashLog.save(error) }
+            // 앱을 다시 열어도 원인을 볼 수 있도록 따로 남긴다
+            runCatching {
+                Prefs.lastError = "'${currentEntry?.track?.title ?: "?"}' · $desc"
+                Prefs.lastErrorAt = java.text.SimpleDateFormat(
+                    "MM-dd HH:mm:ss", java.util.Locale.KOREA
+                ).format(java.util.Date())
+            }
             val p = player
             val duration = p?.duration ?: 0L
             val position = p?.currentPosition ?: 0L
