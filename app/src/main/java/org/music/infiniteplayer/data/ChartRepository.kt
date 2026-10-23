@@ -6,10 +6,12 @@ import org.music.infiniteplayer.core.Net
 import org.music.infiniteplayer.core.Text
 
 /**
- * 차트 파서.
- *  - 멜론 : TOP100 (HTML 테이블 파싱)
- *  - 지니 : 장르별 차트 (HTML 테이블 파싱)
- *  - 유튜브 : 장르별 검색 결과
+ * 차트/음악 데이터 로더.
+ *
+ *  - 멜론 : TOP100 · 장르별 차트 · 최신 뮤직비디오 (HTML 파싱)
+ *  - 유튜브 : 장르 검색 (모음 영상)
+ *
+ * 지니 차트는 v3.5.0 에서 삭제했다.
  */
 class ChartRepository(private val youtube: YoutubeRepository) {
 
@@ -19,7 +21,7 @@ class ChartRepository(private val youtube: YoutubeRepository) {
                 Net.get(source.url, mapOf("User-Agent" to Net.UA_DESKTOP))
             ).take(source.limit)
 
-            SourceKind.GENIE -> parseGenie(
+            SourceKind.MELON_MV -> parseMelonMv(
                 Net.get(source.url, mapOf("User-Agent" to Net.UA_DESKTOP))
             ).take(source.limit)
 
@@ -27,11 +29,11 @@ class ChartRepository(private val youtube: YoutubeRepository) {
         }
     }
 
-    /** 통합 검색 : 음악 영상만 골라서 검색 */
+    /** 통합 검색 : 노래 관련 영상만 골라서 검색 */
     suspend fun searchMusic(query: String, limit: Int = 40): List<Track> =
         youtube.searchMusic(query, limit)
 
-    // ── 멜론 ──────────────────────────────────────────────────
+    // ── 멜론 차트 ──────────────────────────────────────────────
     private fun parseMelon(html: String): List<Track> {
         val tracks = ArrayList<Track>(60)
         TR_RE.findAll(html).forEach { m ->
@@ -72,32 +74,61 @@ class ChartRepository(private val youtube: YoutubeRepository) {
                 )
             )
         }
-        if (tracks.isEmpty()) throw IllegalStateException("멜론 차트 파싱 실패 (사이트 구조 변경)")
+        if (tracks.isEmpty()) throw IllegalStateException("멜론 차트 파싱 실패 (페이지 구조 변경?)")
         return tracks
     }
 
-    // ── 지니 ──────────────────────────────────────────────────
-    private fun parseGenie(html: String): List<Track> {
-        val tracks = ArrayList<Track>(60)
-        G_TR_RE.findAll(html).forEach { m ->
+    // ── 멜론 최신 뮤직비디오 ───────────────────────────────────
+    private fun parseMelonMv(html: String): List<Track> {
+        val tracks = ArrayList<Track>(40)
+        MV_ITEM_RE.findAll(html).forEach { m ->
             val body = m.groupValues[1]
-            val titleM = G_TITLE_RE.find(body) ?: return@forEach
-            val title = Text.clean(titleM.groupValues[1])
+            val mvId = MV_ID_RE.find(body)?.groupValues?.get(1) ?: return@forEach
+            val rawTitle = MV_TITLE_ATTR_RE.find(body)?.groupValues?.get(1)
+                ?: MV_TITLE_TEXT_RE.find(body)?.groupValues?.get(1)
+                ?: return@forEach
+
+            var title = Text.clean(rawTitle)
+            title = title.substringBeforeLast(" - 페이지 이동").trim()
+            title = title.removePrefix("[MV]").trim()
             if (title.isEmpty()) return@forEach
-            val artist = G_ARTIST_RE.find(body)?.let { Text.clean(it.groupValues[1]) }.orEmpty()
-            val rank = G_RANK_RE.find(body)?.groupValues?.get(1)?.toIntOrNull() ?: (tracks.size + 1)
+            // 예고편(Teaser)은 30초 내외라 곡으로 재생하기엔 부적합하다
+            if (title.contains("teaser", true) || title.contains("티저", true)) return@forEach
+
+            val artist = MV_ARTIST_RE.find(body)?.groupValues?.get(1)
+                ?.let { Text.clean(it) }
+                ?.substringBeforeLast(" - 페이지 이동")
+                ?.trim()
+                .orEmpty()
+            val thumb = MV_THUMB_RE.find(body)?.groupValues?.get(1).orEmpty()
+            val duration = parseTime(MV_TIME_RE.find(body)?.groupValues?.get(1).orEmpty())
+
             tracks.add(
                 Track(
-                    id = "genie_" + Text.norm(title) + "_" + Text.norm(artist),
+                    id = "melonmv_$mvId",
                     title = title,
                     artist = artist,
-                    rank = rank,
-                    source = "genie",
+                    rank = tracks.size + 1,
+                    source = "melonmv",
+                    thumbUrl = thumb,
+                    durationMs = duration,
                 )
             )
         }
-        if (tracks.isEmpty()) throw IllegalStateException("지니 차트 파싱 실패 (사이트 구조 변경)")
+        if (tracks.isEmpty()) {
+            throw IllegalStateException("멜론 뮤직비디오 파싱 실패 (페이지 구조 변경?)")
+        }
         return tracks
+    }
+
+    private fun parseTime(text: String): Long {
+        if (text.isBlank()) return 0L
+        var sec = 0L
+        for (p in text.split(":")) {
+            val v = p.trim().toLongOrNull() ?: return 0L
+            sec = sec * 60 + v
+        }
+        return sec * 1000L
     }
 
     private fun firstLink(fragment: String): String {
@@ -122,9 +153,13 @@ class ChartRepository(private val youtube: YoutubeRepository) {
         val SONG_NO_RE = Regex("data-song-no=\"(\\d+)\"")
         val THUMB_RE = Regex("<img[^>]+src=\"(https://cdnimg\\.melon\\.co\\.kr[^\"]+)\"")
 
-        val G_TR_RE = Regex("<tr[^>]*>(.*?)</tr>", RegexOption.DOT_MATCHES_ALL)
-        val G_TITLE_RE = Regex("class=\"title[^\"]*\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL)
-        val G_ARTIST_RE = Regex("class=\"artist[^\"]*\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL)
-        val G_RANK_RE = Regex("class=\"rank[^\"]*\"[^>]*>.*?(\\d+)<", RegexOption.DOT_MATCHES_ALL)
+        // 최신 뮤직비디오 페이지 (/new/mv/index.htm)
+        val MV_ITEM_RE = Regex("<li>(.*?)</li>", RegexOption.DOT_MATCHES_ALL)
+        val MV_ID_RE = Regex("goMvDetail\\(\\s*'[^']*'\\s*,\\s*'(\\d+)'")
+        val MV_TITLE_ATTR_RE = Regex("class=\"ellipsis album_name\"[^>]*title=\"([^\"]*)\"")
+        val MV_TITLE_TEXT_RE = Regex("class=\"ellipsis album_name\"[^>]*>(.*?)</a>", RegexOption.DOT_MATCHES_ALL)
+        val MV_ARTIST_RE = Regex("class=\"artist_name[^\"]*\"[^>]*title=\"([^\"]*)\"")
+        val MV_THUMB_RE = Regex("<img[^>]+src=\"(https://cdnimg[^\"]+)\"")
+        val MV_TIME_RE = Regex("class=\"time\">(\\d+:\\d+)</span>")
     }
 }

@@ -692,7 +692,6 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun onTrackChanged(entry: Entry) {
-        // v3.1.0 : 가사 기능 제거 — 곡이 바뀌면 화면 상태만 갱신한다
         publish()
     }
 
@@ -1346,8 +1345,13 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    /** 벨소리로 설정 (곡 전체를 벨소리로 지정) */
-    fun setAsRingtone() {
+    /**
+     * 벨소리로 설정.
+     *
+     * @param startMs  하이라이트 시작 위치 (ms, 0 이면 곡 처음)
+     * @param lengthMs 길이 (ms, 0 이면 곡 전체)
+     */
+    fun setAsRingtone(startMs: Long = 0L, lengthMs: Long = 0L) {
         val entry = currentEntry
         if (entry == null) {
             toast("재생 중인 곡이 없습니다")
@@ -1400,9 +1404,24 @@ class PlaybackService : MediaSessionService() {
                 }
                 useAudio = audio2
             }
-            val name = safeFileName(entry.track, useAudio.mimeType)
+            val fileName = safeFileName(entry.track, useAudio.mimeType)
+            var ringFile = src
+            var highlight = false
+            if (lengthMs > 0) {
+                setManualStatus("벨소리 구간 준비 중...")
+                val trimmed = File(cacheDir, "ring_${entry.track.id.hashCode()}_${startMs}_$lengthMs.m4a")
+                highlight = withContext(Dispatchers.IO) {
+                    org.music.infiniteplayer.core.AudioTrimmer.trim(src, trimmed, startMs, lengthMs)
+                }
+                if (highlight) ringFile = trimmed
+            }
+            val name = if (highlight) {
+                fileName.substringBeforeLast('.') + " (하이라이트)." + fileName.substringAfterLast('.')
+            } else {
+                fileName
+            }
             val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
-                this@PlaybackService, src, name, useAudio.mimeType,
+                this@PlaybackService, ringFile, name, useAudio.mimeType,
             )
             if (saved.uri == null) {
                 errorText = "벨소리 저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"

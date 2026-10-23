@@ -29,8 +29,7 @@ object Prefs {
     const val KEY_LAST_ERROR = "last_error"       // 최근 오류 (진단용, 지워지지 않음)
     const val KEY_LAST_ERROR_AT = "last_error_at" // 최근 오류 시각
     const val KEY_DIAGNOSTICS = "diagnostics"     // 진단 모드 (오류 표시·기록)
-    const val KEY_AGE = "flo_age"                 // 연령 필터 (all | 1020 | 3040 | 5060)
-    const val KEY_VIDEO = "car_video"             // 차량(블루투스) 연결 시 영상 표시
+    const val KEY_MELON_MV = "melon_mv_enabled"   // 멜론 최신 뮤직비디오 사용
 
     fun init(ctx: Context) {
         if (!::sp.isInitialized) {
@@ -93,20 +92,15 @@ object Prefs {
         get() = sp.getString("visitor_data", "") ?: ""
         set(v) = sp.edit().putString("visitor_data", v).apply()
 
-    /** FLO 연령 필터 */
-    var age: String
-        get() = sp.getString(KEY_AGE, "all") ?: "all"
-        set(v) = sp.edit().putString(KEY_AGE, v).apply()
-
     /**
-     * 차량(블루투스) 연결 시 영상 표시.
+     * 멜론 최신 뮤직비디오 사용 여부.
      *
-     * 켜져 있으면 블루투스 오디오(차량/헤드셋)가 연결됐을 때
-     * 지금 재생 화면에 노래에 맞는 영상이 함께 나온다. (소리는 차량에서)
+     *  - 켜짐 : 홈 소스 목록에 "멜론 최신 뮤직비디오"가 추가된다
+     *  - 꺼짐 : 목록에서 완전히 사라진다 (데이터도 받아오지 않는다)
      */
-    var videoEnabled: Boolean
-        get() = sp.getBoolean(KEY_VIDEO, true)
-        set(v) = sp.edit().putBoolean(KEY_VIDEO, v).apply()
+    var melonMvEnabled: Boolean
+        get() = sp.getBoolean(KEY_MELON_MV, true)
+        set(v) = sp.edit().putBoolean(KEY_MELON_MV, v).apply()
 
     // ── 재생목록 복원용 (서비스가 죽어도 곡이 사라지지 않게) ──
     /** 재생목록 전체 (JSON) */

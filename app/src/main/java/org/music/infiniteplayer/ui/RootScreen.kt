@@ -1,8 +1,5 @@
 package org.music.infiniteplayer.ui
 
-import android.content.Context
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -48,19 +45,13 @@ fun RootScreen() {
 
     var page by rememberSaveable { mutableIntStateOf(PAGE_HOME) }
     var sourceKey by rememberSaveable {
-        mutableStateOf(
-            Prefs.lastSource
-                .takeIf { Sources.isFlo(it) }
-                ?: Sources.default.key
-        )
+        mutableStateOf(Prefs.lastSource.ifBlank { Sources.default.key })
     }
-    var age by rememberSaveable { mutableStateOf(Prefs.age) }
+    var mvEnabled by remember { mutableStateOf(Prefs.melonMvEnabled) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var quality by remember { mutableStateOf(Prefs.quality) }
-    var videoEnabled by remember { mutableStateOf(Prefs.videoEnabled) }
-    var carConnected by remember { mutableStateOf(false) }
     var favorites by remember { mutableStateOf(loadFavorites()) }
     var crashLog by remember { mutableStateOf(org.music.infiniteplayer.core.CrashLog.read()) }
     // 지난 실행에서 멈춤이 감지됐는지 (감시자 기록)
@@ -82,32 +73,32 @@ fun RootScreen() {
     }
     val repo = remember { ChartRepository(YoutubeRepository()) }
     val currentSource by rememberUpdatedState(sourceKey)
-    val currentAge by rememberUpdatedState(age)
 
-    // 플레이리스트 로드 : 캐시를 먼저 보여줘 즉시 표시 → 그다음 최신본으로 교체
-    LaunchedEffect(sourceKey, age) {
+    // 차트 로드 : 캐시를 먼저 보여줘 즉시 표시 → 그다음 최신본으로 교체
+    LaunchedEffect(sourceKey, mvEnabled) {
         try {
+            // 뮤직비디오를 끄면 선택 중이던 MV 소스는 기본 소스로 되돌린다
+            if (Sources.byKey(sourceKey, mvEnabled) == null) {
+                sourceKey = Sources.default.key
+                return@LaunchedEffect
+            }
             Prefs.lastSource = sourceKey
             loading = true
             message = ""
-            // v3.1.1 : 목록 구성이 바뀌었으므로 캐시 키도 새로 쓴다
-            // (예전 캐시에는 2시간짜리 모음 영상이 들어 있어 재생이 실패한다)
-            val cacheKey = "v2_${sourceKey}_$age"
-            val cached = Prefs.cachedChart(cacheKey)
+            val cached = Prefs.cachedChart(sourceKey)
             tracks = if (cached.isNotEmpty()) decodeTracks(cached) else emptyList()
             try {
-                val base = Sources.byKey(sourceKey) ?: Sources.default
-                val fresh = repo.load(Sources.applyAge(base, age))
-                if (currentSource == sourceKey && currentAge == age) {
+                val fresh = repo.load(Sources.byKey(sourceKey, mvEnabled) ?: Sources.default)
+                if (currentSource == sourceKey) {
                     tracks = fresh
-                    Prefs.saveChart(cacheKey, encodeTracks(fresh))
+                    Prefs.saveChart(sourceKey, encodeTracks(fresh))
                 }
             } catch (e: Exception) {
-                if (currentSource == sourceKey && currentAge == age) {
+                if (currentSource == sourceKey) {
                     message = e.message ?: "차트를 불러오지 못했습니다."
                 }
             }
-            if (currentSource == sourceKey && currentAge == age) loading = false
+            if (currentSource == sourceKey) loading = false
         } catch (e: Exception) {
             org.music.infiniteplayer.core.CrashLog.save(e)
             loading = false
@@ -129,10 +120,8 @@ fun RootScreen() {
     // 안전망 : 서비스가 죽었는데 UI 가 살아 있으면 다시 살린다
     val appContext = LocalContext.current
     LaunchedEffect(Unit) {
-        carConnected = isBluetoothAudioConnected(appContext)
         while (true) {
             delay(3000)
-            carConnected = isBluetoothAudioConnected(appContext)
             if (!PlayerBus.isAttached()) {
                 try {
                     appContext.startService(
@@ -193,6 +182,7 @@ fun RootScreen() {
                 },
                 onRetry = { PlayerBus.post { it.retryCurrent() } },
                 onDownload = { PlayerBus.post { it.downloadToDevice() } },
+                onRingtone = { start, length -> PlayerBus.post { it.setAsRingtone(start, length) } },
                 onRaiseVolume = { PlayerBus.post { it.raiseSystemVolume() } },
                 onBack = { page = PAGE_HOME },
                 onTogglePlay = { PlayerBus.post { it.toggle() } },
@@ -203,8 +193,6 @@ fun RootScreen() {
                 onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
                 onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
                 onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
-                carConnected = carConnected,
-                videoEnabled = videoEnabled,
             )
 
             PAGE_SETTINGS -> SettingsScreen(
@@ -222,12 +210,12 @@ fun RootScreen() {
                     quality = q
                     Prefs.quality = q
                 },
-                onOpenFavorites = { page = PAGE_FAVORITES },
-                videoEnabled = videoEnabled,
-                onVideoEnabled = { b ->
-                    videoEnabled = b
-                    Prefs.videoEnabled = b
+                mvEnabled = mvEnabled,
+                onMelonMv = { b ->
+                    mvEnabled = b
+                    Prefs.melonMvEnabled = b
                 },
+                onOpenFavorites = { page = PAGE_FAVORITES },
             )
 
             PAGE_FAVORITES -> FavoritesScreen(
@@ -261,16 +249,12 @@ fun RootScreen() {
                     tracks = shown,
                     state = state,
                     sourceKey = sourceKey,
+                    mvEnabled = mvEnabled,
                     loading = loading,
                     searchQuery = searchQuery,
                     searchActive = searchActive,
                     searching = searching,
                     favorites = favorites,
-                    age = age,
-                    onAgeChange = { a ->
-                        age = a
-                        Prefs.age = a
-                    },
                     onPlayFavorite = playFavorite,
                     onPlayAllFavorites = {
                         if (favorites.isNotEmpty()) {
@@ -334,26 +318,3 @@ fun RootScreen() {
 }
 
 private fun loadFavorites(): List<Track> = Prefs.favoriteTracks().map { Track.fromJson(it) }
-
-/**
- * 블루투스 오디오(차량/헤드셋)가 연결되어 있는지 확인한다.
- *
- * A2DP(음악 재생)뿐 아니라 SCO(통화), USB 오디오도 차량 연결로 본다.
- * (일부 차량은 USB 오디오로 연결되기 때문)
- */
-private fun isBluetoothAudioConnected(context: Context): Boolean {
-    return try {
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { device ->
-            when (device.type) {
-                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-                AudioDeviceInfo.TYPE_USB_HEADSET,
-                AudioDeviceInfo.TYPE_USB_DEVICE -> true
-                else -> false
-            }
-        }
-    } catch (_: Exception) {
-        false
-    }
-}

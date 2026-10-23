@@ -100,40 +100,6 @@ class YoutubeRepository(var quality: String = "high") {
             null
         }
 
-    /**
-     * 차량 영상용 : 현재 곡에 맞는 "영상" 스트림을 찾는다.
-     *
-     *  - 곡에 영상 ID 가 있으면 그 영상(공식 뮤직비디오)을 먼저 쓴다
-     *  - 없으면 곡 제목/가수로 검색해 가장 비슷한 영상을 쓴다
-     *  - 소리는 기존 오디오 플레이어가 재생하므로 영상은 음소거로 튼다
-     */
-    suspend fun resolveVideoStream(track: Track): ResolvedAudio? =
-        withContext(Dispatchers.IO) {
-            if (track.videoId.isNotBlank()) {
-                val direct = resolveVideo(
-                    track.videoId,
-                    track.title,
-                    track.artist,
-                    track.thumbUrl,
-                    track.durationMs,
-                    wantVideo = true,
-                )
-                if (direct != null) return@withContext direct
-            }
-            for (candidate in searchCandidates(track)) {
-                val video = resolveVideo(
-                    candidate.videoId,
-                    candidate.title,
-                    candidate.artist,
-                    candidate.thumbUrl,
-                    candidate.durationMs,
-                    wantVideo = true,
-                )
-                if (video != null) return@withContext video
-            }
-            null
-        }
-
     /** 검색 결과 중 점수 높은 순으로 상위 후보 (최대 4개) */
     private suspend fun searchCandidates(track: Track): List<Track> {
         val results = search(buildQuery(track), 12)
@@ -144,6 +110,41 @@ class YoutubeRepository(var quality: String = "high") {
         // 점수가 너무 낮으면(다른 곡) 후보를 넓히지 않는다
         val limit = if (best >= 2) 4 else 2
         return scored.take(limit).map { it.first }
+    }
+
+    /**
+     * 차량/지금재생 화면에서 보여줄 "영상" 스트림을 찾는다.
+     *
+     *  - 곡에 영상 ID 가 있으면 그 영상 (공식 뮤직비디오) 을 먼저 쓴다
+     *  - 없으면 제목/가수로 검색해 가장 비슷한 "영상" 을 찾는다
+     *  - 소리는 메인 플레이어가 따로 재생하므로 영상은 음소거로 튼다
+     */
+    suspend fun resolveVideoStream(track: Track): ResolvedAudio? = withContext(Dispatchers.IO) {
+        if (track.videoId.isNotBlank()) {
+            val direct = resolveVideo(
+                track.videoId,
+                track.title,
+                track.artist,
+                track.thumbUrl,
+                track.durationMs,
+                wantVideo = true,
+            )
+            if (direct != null) return@withContext direct
+        }
+        for (candidate in searchCandidates(track)) {
+            // 모음 영상은 길이가 길어 영상으로 쓰기엔 부적합하다 (앨범아트 유지)
+            if (candidate.isCompilation) continue
+            val video = resolveVideo(
+                candidate.videoId,
+                candidate.title,
+                candidate.artist,
+                candidate.thumbUrl,
+                candidate.durationMs,
+                wantVideo = true,
+            )
+            if (video != null) return@withContext video
+        }
+        null
     }
 
     private suspend fun resolveVideo(
@@ -316,23 +317,11 @@ class YoutubeRepository(var quality: String = "high") {
         return list.maxByOrNull { it.bitrate }
     }
 
-    private fun collectFormats(formats: JSONArray?): List<Fmt> {
-        if (formats == null) return emptyList()
-        val list = ArrayList<Fmt>(formats.length())
-        for (i in 0 until formats.length()) {
-            val f = formats.optJSONObject(i) ?: continue
-            val url = f.optString("url")
-            if (url.isBlank()) continue           // 암호화(cipher) 필요한 포맷은 사용 불가
-            list.add(Fmt(f.optInt("itag"), url, f.optString("mimeType"), f.optInt("bitrate")))
-        }
-        return list
-    }
-
     /**
-     * 차량 영상 포맷 선택.
+     * 영상 포맷 선택.
      *
-     * 1) 소리+영상이 함께 있는 mp4(itag 18/22)를 우선 사용
-     * 2) 없으면 화질이 가장 낮은 영상 전용 포맷 (데이터 절약)
+     * 1) 소리+영상이 함께 있는 mp4 (itag 18/22) 을 우선 사용 — 가장 가볍다
+     * 2) 없으면 화질이 낮은 영상 전용 포맷 (소리는 어차피 음소거)
      */
     private fun pickVideo(streaming: JSONObject): Fmt? {
         val mixed = collectFormats(streaming.optJSONArray("formats"))
@@ -342,6 +331,18 @@ class YoutubeRepository(var quality: String = "high") {
         val onlyVideo = collectFormats(streaming.optJSONArray("adaptiveFormats"))
             .filter { it.mime.startsWith("video/mp4") }
         return onlyVideo.minByOrNull { it.bitrate } ?: mixed.firstOrNull()
+    }
+
+    private fun collectFormats(formats: JSONArray?): List<Fmt> {
+        if (formats == null) return emptyList()
+        val out = ArrayList<Fmt>(formats.length())
+        for (i in 0 until formats.length()) {
+            val f = formats.optJSONObject(i) ?: continue
+            val url = f.optString("url")
+            if (url.isBlank()) continue           // 암호화(cipher) 필요한 포맷은 사용 불가
+            out.add(Fmt(f.optInt("itag"), url, f.optString("mimeType"), f.optInt("bitrate")))
+        }
+        return out
     }
 
     private fun pickCaption(obj: JSONObject): String {
@@ -374,7 +375,9 @@ class YoutubeRepository(var quality: String = "high") {
     private fun buildQuery(track: Track): String {
         val artist = track.artist.trim()
         val title = track.title.trim()
-        return if (artist.isEmpty()) title else "$artist $title"
+        val base = if (artist.isEmpty()) title else "$artist $title"
+        // 멜론 최신 뮤직비디오는 "뮤직비디오" 를 붙여야 공식 MV 가 먼저 나온다
+        return if (track.source == "melonmv") "$base 뮤직비디오" else base
     }
 
     private fun pickBest(results: List<Track>, target: Track): Track? {
@@ -499,6 +502,10 @@ class YoutubeRepository(var quality: String = "high") {
         val BAD_WORDS = listOf(
             "cover", "커버", "카페", "instrumental", "반복", "1시간", "live", "라이브",
             "remix", "nightcore", "practice", "연습", "8d", "concert", "공연",
+            // 모음/플레이리스트 영상은 한 곡이 아니므로 후보에서 밀어낸다
+            "모음", "playlist", "플레이리스트", "연속재생", "메들리", "medley",
+            "nonstop", "논스톱", "2시간", "3시간", "10시간", "greatest hits",
+            "full album", "compilation", "인기차트", "선곡",
         )
         val GOOD_WORDS = listOf("official", "mv", "m/v", "audio", "키WI", "정오fficial")
 
