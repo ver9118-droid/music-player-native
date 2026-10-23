@@ -542,7 +542,7 @@ private fun ChartBanner(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = if (loading) "불러오는 중..." else "$count곡 · FLO 스타일",
+                text = if (loading) "불러오는 중..." else "${count}곡 · FLO 스타일",
                 color = Color.White.copy(alpha = 0.75f),
                 fontSize = 11.5.sp,
             )
