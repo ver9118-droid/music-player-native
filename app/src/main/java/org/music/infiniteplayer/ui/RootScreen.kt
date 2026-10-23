@@ -165,12 +165,12 @@ fun RootScreen() {
         }
     }
 
-    // 상태바/네비게이션바 영역과 겹치지 않도록 inset 적용
+    // 지금 재생 화면은 가로 전체 화면을 위해 inset 을 화면 안에서 직접 처리한다
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Bg)
-            .systemBarsPadding()
+            .then(if (page == PAGE_PLAYER) Modifier else Modifier.systemBarsPadding()),
     ) {
         when (page) {
             PAGE_PLAYER -> NowPlayingScreen(

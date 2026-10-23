@@ -1,9 +1,17 @@
 package org.music.infiniteplayer.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -16,8 +24,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -37,6 +49,8 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
@@ -62,18 +76,24 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +104,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import kotlinx.coroutines.delay
 import org.music.infiniteplayer.data.Source
 import org.music.infiniteplayer.data.Sources
 import org.music.infiniteplayer.data.Track
@@ -768,77 +792,157 @@ fun NowPlayingScreen(
     var showRingtone by remember { mutableStateOf(false) }
     val track = state.track
 
-    // 화면을 돌려도 잘리거나 겹치지 않도록 가로/세로 레이아웃을 나눈다.
-    //  - 세로: 위에서 아래로 (내용이 길면 스크롤)
-    //  - 가로: 왼쪽 영상/앨범아트, 오른쪽 정보·컨트롤
+    val context = LocalContext.current
+    val view = LocalView.current
+    val activity = remember(context) { context.findActivity() }
+
+    // 화면 방향 잠금 (가로로 돌린 상태에서 고정)
+    var orientationLocked by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(orientationLocked) {
+        activity?.requestedOrientation = if (orientationLocked) {
+            ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    // 가로: 영상 전체 화면 + 탭하면 컨트롤 표시, 세로: 기존 세로 배치
+    val isLandscape =
+        LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    // 가로에서 컨트롤을 만지지 않으면 잠시 뒤 자동으로 숨긴다
+    var controlsVisible by rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(isLandscape) {
+        if (isLandscape) controlsVisible = true
+    }
+    LaunchedEffect(isLandscape, controlsVisible) {
+        if (isLandscape && controlsVisible && state.playing) {
+            delay(5000)
+            controlsVisible = false
+        }
+    }
+
+    // 가로 전체 화면(컨트롤 숨김)에서는 상태바/내비게이션바도 숨긴다
+    val barController = remember(activity, view) {
+        activity?.let { WindowCompat.getInsetsController(it.window, view) }
+    }
+    LaunchedEffect(isLandscape, controlsVisible) {
+        val controller = barController ?: return@LaunchedEffect
+        if (isLandscape && !controlsVisible) {
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            barController?.show(WindowInsetsCompat.Type.systemBars())
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Bg),
+            .background(Bg)
+            .then(if (isLandscape) Modifier else Modifier.systemBarsPadding()),
     ) {
         val screenWidth = maxWidth
         val screenHeight = maxHeight
-        val landscape = screenWidth > screenHeight
 
-        if (landscape) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                PlayerTopBar(
-                    isFavorite = isFavorite,
-                    onBack = onBack,
-                    onToggleFavorite = onToggleFavorite,
+        if (isLandscape) {
+            // ── 가로 전체 화면 ─────────────────────────────────
+            // 탭하면 컨트롤이 나타나고, 가만히 두면 다시 영상만 보인다.
+            Box(Modifier.fillMaxSize()) {
+                PlayerMedia(
+                    track = track,
+                    thumbUrl = state.thumbUrl,
+                    playing = state.playing,
+                    positionMs = tick.positionMs,
+                    artworkSize = minOf(screenWidth, screenHeight),
+                    modifier = Modifier.fillMaxSize(),
+                    rounded = false,
                 )
-                Row(
+
+                // 영상 위를 탭하면 컨트롤 표시/숨김 (PlayerView 가 터치를 먹지 않도록 위에 둔다)
+                Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { controlsVisible = !controlsVisible },
+                )
+
+                AnimatedVisibility(
+                    visible = controlsVisible,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
                 ) {
-                    PlayerMedia(
-                        track = track,
-                        thumbUrl = state.thumbUrl,
-                        playing = state.playing,
-                        positionMs = tick.positionMs,
-                        artworkSize = minOf(screenHeight - 120.dp, screenWidth / 2 - 48.dp)
-                            .coerceAtLeast(96.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .padding(end = 14.dp),
-                    )
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .verticalScroll(rememberScrollState())
-                            .padding(vertical = 4.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        PlayerDetails(
-                            state = state,
-                            positionMs = tick.positionMs,
-                            durationMs = tick.durationMs,
-                            diag = diag,
-                            onRetry = onRetry,
-                            onDownload = onDownload,
-                            onRingtone = { showRingtone = true },
-                            onRaiseVolume = onRaiseVolume,
-                            onTogglePlay = onTogglePlay,
-                            onNext = onNext,
-                            onPrev = onPrev,
-                            onSeek = onSeek,
-                            onVolume = onVolume,
-                            onShuffle = onShuffle,
-                            onRepeat = onRepeat,
-                        )
+                    Column(Modifier.fillMaxSize()) {
+                        // 상단: 접기 · 제목 · 화면 잠금 · 즐겨찾기
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Black.copy(alpha = 0.72f), Color.Transparent),
+                                    ),
+                                )
+                                .statusBarsPadding(),
+                        ) {
+                            PlayerTopBar(
+                                isFavorite = isFavorite,
+                                orientationLocked = orientationLocked,
+                                onToggleOrientationLock = { orientationLocked = !orientationLocked },
+                                onBack = onBack,
+                                onToggleFavorite = onToggleFavorite,
+                            )
+                        }
+
+                        Spacer(Modifier.weight(1f))
+
+                        // 하단: 곡 정보 · 진행바 · 다운로드/벨소리 · 재생 버튼
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f)),
+                                    ),
+                                )
+                                .navigationBarsPadding()
+                                .heightIn(max = screenHeight * 0.62f)
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 24.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            PlayerDetails(
+                                state = state,
+                                positionMs = tick.positionMs,
+                                durationMs = tick.durationMs,
+                                diag = diag,
+                                compact = true,
+                                onRetry = onRetry,
+                                onDownload = onDownload,
+                                onRingtone = { showRingtone = true },
+                                onRaiseVolume = onRaiseVolume,
+                                onTogglePlay = onTogglePlay,
+                                onNext = onNext,
+                                onPrev = onPrev,
+                                onSeek = onSeek,
+                                onVolume = onVolume,
+                                onShuffle = onShuffle,
+                                onRepeat = onRepeat,
+                            )
+                        }
                     }
                 }
             }
         } else {
+            // ── 세로 ───────────────────────────────────────────
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -848,6 +952,8 @@ fun NowPlayingScreen(
             ) {
                 PlayerTopBar(
                     isFavorite = isFavorite,
+                    orientationLocked = orientationLocked,
+                    onToggleOrientationLock = { orientationLocked = !orientationLocked },
                     onBack = onBack,
                     onToggleFavorite = onToggleFavorite,
                 )
@@ -894,10 +1000,22 @@ fun NowPlayingScreen(
     }
 }
 
-/** 지금 재생 상단 바 (접기 · 제목 · 즐겨찾기) */
+/** Context 에서 Activity 꺼내기 (화면 방향 잠금/시스템 바 제어용) */
+private fun Context.findActivity(): Activity? {
+    var ctx: Context = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+/** 지금 재생 상단 바 (접기 · 제목 · 화면 잠금 · 즐겨찾기) */
 @Composable
 private fun PlayerTopBar(
     isFavorite: Boolean,
+    orientationLocked: Boolean,
+    onToggleOrientationLock: () -> Unit,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
 ) {
@@ -918,6 +1036,14 @@ private fun PlayerTopBar(
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
         )
+        // 화면 방향 잠금: 켜두면 휴대폰을 돌려도 화면이 바뀌지 않는다
+        IconButton(onClick = onToggleOrientationLock) {
+            Icon(
+                if (orientationLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                contentDescription = if (orientationLocked) "화면 방향 잠금 해제" else "화면 방향 잠금",
+                tint = if (orientationLocked) Accent else TextSecondary,
+            )
+        }
         IconButton(onClick = onToggleFavorite) {
             Icon(
                 if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
@@ -942,6 +1068,7 @@ private fun PlayerMedia(
     positionMs: Long,
     artworkSize: Dp,
     modifier: Modifier = Modifier,
+    rounded: Boolean = true,
 ) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (track == null || track.isCompilation) {
@@ -958,7 +1085,9 @@ private fun PlayerMedia(
                 positionMs = positionMs,
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(20.dp)),
+                    .then(
+                        if (rounded) Modifier.clip(RoundedCornerShape(20.dp)) else Modifier,
+                    ),
                 fallback = {
                     Artwork(
                         url = thumbUrl,
@@ -972,13 +1101,18 @@ private fun PlayerMedia(
     }
 }
 
-/** 곡 정보 · 진행바 · 다운로드/벨소리 · 재생 컨트롤 · 볼륨 · 상태 */
+/**
+ * 곡 정보 · 진행바 · 다운로드/벨소리 · 재생 컨트롤 · 볼륨 · 상태
+ *
+ * @param compact 가로 전체 화면 오버레이용 (영상을 가리지 않도록 볼륨/상태 칩 생략)
+ */
 @Composable
 private fun PlayerDetails(
     state: PlayerState,
     positionMs: Long,
     durationMs: Long,
     diag: Diagnostics,
+    compact: Boolean = false,
     onRetry: () -> Unit,
     onDownload: () -> Unit,
     onRingtone: () -> Unit,
@@ -995,7 +1129,7 @@ private fun PlayerDetails(
     Text(
         text = state.title.ifBlank { "-" },
         color = TextPrimary,
-        fontSize = 21.sp,
+        fontSize = if (compact) 17.sp else 21.sp,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -1006,13 +1140,13 @@ private fun PlayerDetails(
         text = listOf(state.artist, state.album).filter { it.isNotBlank() }.joinToString(" · ")
             .ifBlank { " " },
         color = TextSecondary,
-        fontSize = 13.5.sp,
+        fontSize = if (compact) 12.sp else 13.5.sp,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.fillMaxWidth(),
     )
 
-    Spacer(Modifier.height(14.dp))
+    Spacer(Modifier.height(if (compact) 8.dp else 14.dp))
 
     // 진행 바
     SeekBar(
@@ -1032,7 +1166,7 @@ private fun PlayerDetails(
         onRingtone = onRingtone,
     )
 
-    Spacer(Modifier.height(10.dp))
+    Spacer(Modifier.height(if (compact) 6.dp else 10.dp))
 
     // 재생 컨트롤
     EvenRow {
@@ -1081,39 +1215,41 @@ private fun PlayerDetails(
         )
     }
 
-    Spacer(Modifier.height(10.dp))
+    if (!compact) {
+        Spacer(Modifier.height(10.dp))
 
-    // 볼륨
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Rounded.VolumeDown, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
-        Slider(
-            value = state.volume,
-            onValueChange = onVolume,
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 10.dp),
-            colors = SliderDefaults.colors(
-                thumbColor = Accent,
-                activeTrackColor = Accent,
-                inactiveTrackColor = Surface2,
-            ),
-        )
-        Icon(Icons.Rounded.VolumeUp, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
-    }
+        // 볼륨
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.VolumeDown, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
+            Slider(
+                value = state.volume,
+                onValueChange = onVolume,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = Accent,
+                    activeTrackColor = Accent,
+                    inactiveTrackColor = Surface2,
+                ),
+            )
+            Icon(Icons.Rounded.VolumeUp, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
+        }
 
-    // 상태 표시
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        StatusChip(
-            text = state.status.ifBlank { "대기" },
-            color = if (state.error.isNotBlank()) Danger else AccentSoft,
-        )
-        if (state.infinite) StatusChip("무한 재생", Accent)
-        if (state.callActive) StatusChip("통화 중", Danger)
-        if (diag.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
+        // 상태 표시
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusChip(
+                text = state.status.ifBlank { "대기" },
+                color = if (state.error.isNotBlank()) Danger else AccentSoft,
+            )
+            if (state.infinite) StatusChip("무한 재생", Accent)
+            if (state.callActive) StatusChip("통화 중", Danger)
+            if (diag.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
+        }
     }
 
     // 시스템 볼륨이 0 이면 소리가 안 난다 (가장 흔한 원인)
