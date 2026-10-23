@@ -1348,10 +1348,11 @@ class PlaybackService : MediaSessionService() {
     /**
      * 벨소리로 설정.
      *
-     * @param startMs  하이라이트 시작 위치 (ms, 0 이면 곡 처음)
-     * @param lengthMs 길이 (ms, 0 이면 곡 전체)
+     * 곡마다 후렴 위치가 다르므로 사용자가 초를 고르게 하지 않는다.
+     * 음원을 실제로 분석해 **소리가 가장 큰 30초 구간**을 자동으로 잘라 벨소리로 쓴다.
+     * (분석 실패 시 곡 길이의 35% 지점, 그것도 안 되면 곡 전체)
      */
-    fun setAsRingtone(startMs: Long = 0L, lengthMs: Long = 0L) {
+    fun setAsRingtone() {
         val entry = currentEntry
         if (entry == null) {
             toast("재생 중인 곡이 없습니다")
@@ -1407,8 +1408,17 @@ class PlaybackService : MediaSessionService() {
             val fileName = safeFileName(entry.track, useAudio.mimeType)
             var ringFile = src
             var highlight = false
-            if (lengthMs > 0) {
+            setManualStatus("하이라이트 구간 찾는 중...")
+            publish()
+            val found = withContext(Dispatchers.IO) {
+                org.music.infiniteplayer.core.HighlightFinder.find(src)
+            }
+            val startMs = found.startMs
+            val lengthMs = found.lengthMs
+            // 곡 전체가 벨소리 길이면 자를 필요가 없다
+            if (lengthMs > 0 && lengthMs < found.durationMs - 1_000L) {
                 setManualStatus("벨소리 구간 준비 중...")
+                publish()
                 val trimmed = File(cacheDir, "ring_${entry.track.id.hashCode()}_${startMs}_$lengthMs.m4a")
                 highlight = withContext(Dispatchers.IO) {
                     org.music.infiniteplayer.core.AudioTrimmer.trim(src, trimmed, startMs, lengthMs)
@@ -1434,8 +1444,24 @@ class PlaybackService : MediaSessionService() {
                 org.music.infiniteplayer.core.RingtoneSetter.setRingtone(this@PlaybackService, saved.uri)
             }
             errorText = ""
-            setManualStatus(if (ok) "벨소리로 설정했습니다" else "벨소리로 저장했습니다 (설정에서 선택)")
-            toast(if (ok) "벨소리로 설정했습니다" else "벨소리 파일은 저장했습니다. 설정 → 소리 → 벨소리에서 선택하세요")
+            val startLabel = if (highlight) {
+                val total = (startMs / 1000L)
+                val mm = total / 60
+                val ss = total % 60
+                " · ${if (mm > 0) "${mm}분 " else ""}${ss}초부터"
+            } else {
+                ""
+            }
+            setManualStatus(
+                if (ok) "벨소리로 설정했습니다$startLabel" else "벨소리로 저장했습니다 (설정에서 선택)$startLabel",
+            )
+            toast(
+                if (ok) {
+                    "벨소리로 설정했습니다$startLabel"
+                } else {
+                    "벨소리 파일을 저장했습니다. 설정 → 소리 → 벨소리에서 선택하세요$startLabel"
+                },
+            )
             publish()
         }
     }

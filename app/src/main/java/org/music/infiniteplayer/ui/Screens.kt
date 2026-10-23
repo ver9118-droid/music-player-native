@@ -747,7 +747,7 @@ fun NowPlayingScreen(
     onToggleFavorite: () -> Unit,
     onRetry: () -> Unit,
     onDownload: () -> Unit,
-    onRingtone: (Long, Long) -> Unit,
+    onRingtone: () -> Unit,
     onRaiseVolume: () -> Unit,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
@@ -878,12 +878,11 @@ fun NowPlayingScreen(
         )
 
         if (showRingtone) {
-            RingtoneDialog(
-                durationMs = tick.durationMs,
+            RingtoneConfirmDialog(
                 onDismiss = { showRingtone = false },
-                onConfirm = { start, length ->
+                onConfirm = {
                     showRingtone = false
-                    onRingtone(start, length)
+                    onRingtone()
                 },
             )
         }
@@ -1263,66 +1262,28 @@ private fun ActionChips(
 }
 
 /**
- * 벨소리 구간 선택 창.
+ * 벨소리 설정 확인 창.
  *
- * 기본값은 "하이라이트 30초" 이다.
- *  - 시작 위치 : 곡 길이의 35% (보통 후렴이 시작되는 지점)
- *  - 길이      : 30초
- * 그대로 [벨소리로 설정] 을 누르면 곡 도입부가 아니라 하이라이트가 울린다.
+ * 초/길이를 고르게 하지 않는다. 곡마다 다른 하이라이트 구간은
+ * [org.music.infiniteplayer.core.HighlightFinder] 가 자동으로 찾는다.
  */
 @Composable
-private fun RingtoneDialog(
-    durationMs: Long,
+private fun RingtoneConfirmDialog(
     onDismiss: () -> Unit,
-    onConfirm: (startMs: Long, lengthMs: Long) -> Unit,
+    onConfirm: () -> Unit,
 ) {
-    val total = if (durationMs > 5_000L) durationMs else 210_000L
-    var start by remember { mutableStateOf((total * 35L / 100L).coerceIn(0L, total - 1_000L)) }
-    var length by remember { mutableStateOf(30_000L) }
-    val maxStart = (total - length).coerceAtLeast(0L)
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("벨소리로 설정", color = TextPrimary, fontWeight = FontWeight.Bold) },
         text = {
             Column {
                 Text(
-                    "기본값은 곡의 하이라이트 30초입니다.",
+                    "이 곡의 하이라이트(후렴) 구간을 자동으로 찾아 30초로 잘라 벨소리로 설정합니다.",
                     color = TextSecondary,
                     fontSize = 12.5.sp,
+                    lineHeight = 18.sp,
                 )
-                Spacer(Modifier.height(14.dp))
-                Text("시작 위치  ${formatTime(start)}", color = TextPrimary, fontSize = 13.sp)
-                Slider(
-                    value = start.coerceIn(0L, maxStart).toFloat(),
-                    onValueChange = { start = it.toLong() },
-                    valueRange = 0f..maxStart.coerceAtLeast(1L).toFloat(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = Accent,
-                        activeTrackColor = Accent,
-                        inactiveTrackColor = Surface2,
-                    ),
-                )
-                Spacer(Modifier.height(6.dp))
-                Text("길이", color = TextPrimary, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(15_000L, 30_000L, 45_000L).forEach { ms ->
-                        RepeatChip(
-                            text = "${ms / 1000}초",
-                            selected = length == ms,
-                            onClick = {
-                                length = ms
-                                if (start > total - ms) start = (total - ms).coerceAtLeast(0L)
-                            },
-                        )
-                    }
-                    RepeatChip(
-                        text = "곡 전체",
-                        selected = length <= 0L,
-                        onClick = { length = 0L; start = 0L },
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
                 Text(
                     "저장 위치: 음악/Ringtones · 기기 설정에서 벨소리로 선택하세요",
                     color = TextSecondary,
@@ -1332,8 +1293,8 @@ private fun RingtoneDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(start, length) }) {
-                Text("벨소리로 설정", color = Accent, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onConfirm) {
+                Text("자동으로 설정", color = Accent, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
@@ -1344,7 +1305,6 @@ private fun RingtoneDialog(
         containerColor = Surface1,
     )
 }
-
 
 @Composable
 private fun SmallChip(

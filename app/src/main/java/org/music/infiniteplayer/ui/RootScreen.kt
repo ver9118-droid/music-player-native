@@ -182,7 +182,7 @@ fun RootScreen() {
                 },
                 onRetry = { PlayerBus.post { it.retryCurrent() } },
                 onDownload = { PlayerBus.post { it.downloadToDevice() } },
-                onRingtone = { start, length -> PlayerBus.post { it.setAsRingtone(start, length) } },
+                onRingtone = { PlayerBus.post { it.setAsRingtone() } },
                 onRaiseVolume = { PlayerBus.post { it.raiseSystemVolume() } },
                 onBack = { page = PAGE_HOME },
                 onTogglePlay = { PlayerBus.post { it.toggle() } },
