@@ -1169,6 +1169,7 @@ fun NowPlayingScreen(
                     title = state.title,
                     artist = state.artist,
                     thumbUrl = state.thumbUrl,
+                    playing = state.playing,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f),
