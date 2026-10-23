@@ -81,6 +81,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.music.infiniteplayer.data.Source
 import org.music.infiniteplayer.data.Sources
 import org.music.infiniteplayer.data.Track
 import org.music.infiniteplayer.core.Storage
@@ -91,6 +92,8 @@ import org.music.infiniteplayer.playback.PlayerState
 // ─────────────────────────────────────────────────────────────
 // 홈 화면
 // ─────────────────────────────────────────────────────────────
+
+private data class SourceItem(val group: String, val source: Source?)
 
 @Composable
 fun HomeScreen(
@@ -628,9 +631,20 @@ private fun SourceChips(
     mvEnabled: Boolean,
     onSelect: (String) -> Unit,
 ) {
-    // 그룹 제목("멜론 차트" 등)은 화면에 표시하지 않는다.
-    // 소스 구성 자체는 그대로 두고 문구만 감춘다.
-    val items = remember(mvEnabled) { Sources.list(mvEnabled) }
+    // "멜론 차트" 그룹 제목만 표시하지 않는다. (소스 구성은 그대로)
+    // 나머지 그룹(최신 뮤직비디오 / 한국대중음악)은 구분을 위해 남긴다.
+    val items = remember(mvEnabled) {
+        buildList {
+            var lastGroup = ""
+            Sources.list(mvEnabled).forEach { src ->
+                if (src.group != lastGroup) {
+                    if (src.group != Sources.GROUP_MELON) add(SourceItem(src.group, null))
+                    lastGroup = src.group
+                }
+                add(SourceItem(src.group, src))
+            }
+        }
+    }
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
@@ -639,21 +653,32 @@ private fun SourceChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(items, key = { it.key }) { src ->
-            val selected = src.key == sourceKey
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (selected) Accent else Surface1)
-                    .clickable { onSelect(src.key) }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-            ) {
+        items(items) { item ->
+            val src = item.source
+            if (src == null) {
                 Text(
-                    text = src.label,
-                    color = if (selected) Color.White else TextSecondary,
-                    fontSize = 13.sp,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    text = item.group,
+                    color = TextSecondary.copy(alpha = 0.75f),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 6.dp, end = 2.dp),
                 )
+            } else {
+                val selected = src.key == sourceKey
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (selected) Accent else Surface1)
+                        .clickable { onSelect(src.key) }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        text = src.label,
+                        color = if (selected) Color.White else TextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    )
+                }
             }
         }
     }
