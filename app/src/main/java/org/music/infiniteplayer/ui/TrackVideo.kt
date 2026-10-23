@@ -66,14 +66,16 @@ fun TrackVideo(
     LaunchedEffect(track.id) {
         failed = false
         url = null
-        val cached = videoCache[track.id]
+        val quality = Prefs.quality
+        val cacheKey = "${track.id}@$quality"
+        val cached = videoCache[cacheKey]
         if (cached != null) {
             url = cached
             return@LaunchedEffect
         }
         val found = try {
             withTimeoutOrNull(20_000L) {
-                YoutubeRepository(Prefs.quality).resolveVideoStream(track)
+                YoutubeRepository(quality).resolveVideoStream(track)
             }
         } catch (_: Exception) {
             null
@@ -81,7 +83,7 @@ fun TrackVideo(
         if (found == null) {
             failed = true
         } else {
-            videoCache[track.id] = found.url
+            videoCache[cacheKey] = found.url
             url = found.url
         }
     }

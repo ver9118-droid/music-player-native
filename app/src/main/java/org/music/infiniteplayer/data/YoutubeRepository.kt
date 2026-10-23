@@ -296,7 +296,13 @@ class YoutubeRepository(var quality: String = "high") {
     }
 
     // ── 포맷 선택 ─────────────────────────────────────────────
-    private data class Fmt(val itag: Int, val url: String, val mime: String, val bitrate: Int)
+    private data class Fmt(
+        val itag: Int,
+        val url: String,
+        val mime: String,
+        val bitrate: Int,
+        val height: Int = 0,
+    )
 
     private fun pickAudio(formats: JSONArray?, preferItags: List<Int>?): Fmt? {
         if (formats == null) return null
@@ -318,19 +324,53 @@ class YoutubeRepository(var quality: String = "high") {
     }
 
     /**
-     * 영상 포맷 선택.
+     * 영상 포맷 선택 (화질 우선).
      *
-     * 1) 소리+영상이 함께 있는 mp4 (itag 18/22) 을 우선 사용 — 가장 가볍다
-     * 2) 없으면 화질이 낮은 영상 전용 포맷 (소리는 어차피 음소거)
+     * 예전에는 영상 전용 포맷 중 **가장 낮은 비트레이트**를 골라서
+     * 144p/240p 처럼 화질이 크게 떨어졌다. 이제는
+     *
+     *  1) 설정된 음질(최고/보통/낮음)에 맞춘 최대 해상도(1080/720/480p)
+     *  2) 그 안에서 **가장 높은 해상도**
+     *  3) 같은 해상도면 H.264(avc1) → AV1 → VP9 순 (기기 호환성)
+     *  4) 그래도 같으면 비트레이트가 높은 것
+     *
+     * 순으로 고른다. 소리는 메인 플레이어가 내므로 영상 포맷에 소리가 없어도 된다.
      */
     private fun pickVideo(streaming: JSONObject): Fmt? {
         val mixed = collectFormats(streaming.optJSONArray("formats"))
             .filter { it.mime.startsWith("video/mp4") }
-        mixed.firstOrNull { it.itag == 18 }?.let { return it }
-        mixed.firstOrNull { it.itag == 22 }?.let { return it }
-        val onlyVideo = collectFormats(streaming.optJSONArray("adaptiveFormats"))
+        val adaptive = collectFormats(streaming.optJSONArray("adaptiveFormats"))
             .filter { it.mime.startsWith("video/mp4") }
-        return onlyVideo.minByOrNull { it.bitrate } ?: mixed.firstOrNull()
+
+        val maxHeight = when (quality) {
+            "low" -> 480
+            "medium" -> 720
+            else -> 1080
+        }
+
+        val pool = (adaptive + mixed)
+            .filter { it.height in 240..maxHeight }
+            .sortedWith(
+                compareByDescending<Fmt> { it.height }
+                    .thenBy { codecRank(it.mime) }
+                    .thenByDescending { it.bitrate },
+            )
+        pool.firstOrNull()?.let { return it }
+
+        // height 정보가 없는 응답에 대한 예비 선택
+        mixed.firstOrNull { it.itag == 22 }?.let { return it }
+        mixed.firstOrNull { it.itag == 18 }?.let { return it }
+        val all = adaptive + mixed
+        return all.filter { it.mime.contains("avc1") }.maxByOrNull { it.bitrate }
+            ?: all.maxByOrNull { it.bitrate }
+    }
+
+    /** 코덱 호환성 순위 (낮을수록 우선) */
+    private fun codecRank(mime: String): Int = when {
+        mime.contains("avc1") -> 0
+        mime.contains("av01") -> 1
+        mime.contains("vp9") || mime.contains("vp09") -> 2
+        else -> 3
     }
 
     private fun collectFormats(formats: JSONArray?): List<Fmt> {
@@ -340,7 +380,15 @@ class YoutubeRepository(var quality: String = "high") {
             val f = formats.optJSONObject(i) ?: continue
             val url = f.optString("url")
             if (url.isBlank()) continue           // 암호화(cipher) 필요한 포맷은 사용 불가
-            out.add(Fmt(f.optInt("itag"), url, f.optString("mimeType"), f.optInt("bitrate")))
+            out.add(
+                Fmt(
+                    itag = f.optInt("itag"),
+                    url = url,
+                    mime = f.optString("mimeType"),
+                    bitrate = f.optInt("bitrate"),
+                    height = f.optInt("height"),
+                )
+            )
         }
         return out
     }
