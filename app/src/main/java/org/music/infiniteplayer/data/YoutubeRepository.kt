@@ -186,6 +186,10 @@ class YoutubeRepository(var quality: String = "high") {
                     pickAudio(streaming.optJSONArray("adaptiveFormats"), preferItags)
                 }) ?: continue
 
+                // 주소가 실제로 열리는지 확인한다.
+                // (모음 영상 등은 주소만 주고 요청하면 403 → 재생 실패)
+                if (!org.music.infiniteplayer.core.StreamRange.probeOk(fmt.url)) continue
+
                 return ResolvedAudio(
                     videoId = videoId,
                     url = fmt.url,

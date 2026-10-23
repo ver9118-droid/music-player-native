@@ -90,7 +90,9 @@ fun RootScreen() {
             Prefs.lastSource = sourceKey
             loading = true
             message = ""
-            val cacheKey = "${sourceKey}_$age"
+            // v3.1.1 : 목록 구성이 바뀌었으므로 캐시 키도 새로 쓴다
+            // (예전 캐시에는 2시간짜리 모음 영상이 들어 있어 재생이 실패한다)
+            val cacheKey = "v2_${sourceKey}_$age"
             val cached = Prefs.cachedChart(cacheKey)
             tracks = if (cached.isNotEmpty()) decodeTracks(cached) else emptyList()
             try {

@@ -69,6 +69,43 @@ object StreamRange {
     var lastHttpCode: Int = -1
         private set
 
+    /**
+     * 재생 전에 주소가 살아있는지 1바이트만 받아 확인한다.
+     *
+     * 유튜브는 영상에 따라 "주소는 주지만 실제 요청은 403" 인 경우가 있다.
+     * (모음/플레이리스트 영상, 일부 봇 차단 대상)
+     * 이런 주소를 플레이어에 넘기면 "버퍼링 → 403 오류" 로 멈추므로,
+     * 여기서 미리 걸러서 다음 클라이언트/다음 곡으로 넘어가게 한다.
+     *
+     * @return true = 재생 가능(또는 판단 불가), false = 확실히 막힘(4xx)
+     */
+    fun probeOk(url: String): Boolean {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 6_000
+                readTimeout = 6_000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", Net.UA_YT)
+                setRequestProperty("Accept", "*/*")
+                setRequestProperty("Range", "bytes=0-0")
+            }
+            val code = conn.responseCode
+            lastHttpCode = code
+            // 403/404/410 처럼 "확실히 막힌" 경우만 실패로 본다.
+            // 시간 초과·연결 오류는 일시적일 수 있으므로 재생을 시도한다.
+            code !in 400..499
+        } catch (_: Exception) {
+            true
+        } finally {
+            try {
+                conn?.disconnect()
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
     /** 닫힌 Range 로 연결을 연다. 실패하면 길이를 다시 알아내어 1회 재시도한다. */
     fun open(url: String, start: Long, length: Long): Pair<HttpURLConnection, Long> {
         var total = contentLengthOf(url)

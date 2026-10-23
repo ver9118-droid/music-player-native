@@ -15,8 +15,14 @@ class ChartRepository(private val youtube: YoutubeRepository) {
 
     suspend fun load(source: Source): List<Track> = withContext(Dispatchers.IO) {
         when (source.kind) {
-            SourceKind.MELON -> parseMelon(Net.get(source.url, mapOf("User-Agent" to Net.UA_DESKTOP)))
-            SourceKind.GENIE -> parseGenie(Net.get(source.url, mapOf("User-Agent" to Net.UA_DESKTOP)))
+            SourceKind.MELON -> parseMelon(
+                Net.get(source.url, mapOf("User-Agent" to Net.UA_DESKTOP))
+            ).take(source.limit)
+
+            SourceKind.GENIE -> parseGenie(
+                Net.get(source.url, mapOf("User-Agent" to Net.UA_DESKTOP))
+            ).take(source.limit)
+
             SourceKind.YOUTUBE -> youtube.search(source.query, source.limit)
         }
     }

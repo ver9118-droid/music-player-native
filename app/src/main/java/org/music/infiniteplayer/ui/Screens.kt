@@ -168,7 +168,14 @@ fun HomeScreen(
                         searching -> "검색 중..."
                         searchActive -> "검색 결과 ${tracks.size}곡"
                         loading -> "플레이리스트 불러오는 중..."
-                        else -> "${currentSource.label} · ${tracks.size}곡"
+                        else -> {
+                            val ageTag = if (tab == TAB_CHART && age != Sources.AGE_ALL) {
+                                " · ${Sources.ageLabel(age)}"
+                            } else {
+                                ""
+                            }
+                            "${currentSource.label}$ageTag · ${tracks.size}곡"
+                        }
                     },
                     color = TextSecondary,
                     fontSize = 11.5.sp,
@@ -210,9 +217,10 @@ fun HomeScreen(
         )
 
         // 연령 필터 / 검색 상태
-        if (!searchActive) {
+        // (연령 필터는 차트 탭에서만 의미가 있다 — 장르·상황은 카드로 고른다)
+        if (!searchActive && tab == TAB_CHART) {
             AgeFilterRow(age = age, onAgeChange = onAgeChange, onOpenSettings = onOpenSettings)
-        } else {
+        } else if (searchActive) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
