@@ -886,6 +886,7 @@ fun NowPlayingScreen(
                     artworkSize = minOf(screenWidth, screenHeight),
                     modifier = Modifier.fillMaxSize(),
                     rounded = false,
+                    zoom = true,
                 )
 
                 // 영상 위를 탭하면 컨트롤 표시/숨김 (PlayerView 가 터치를 먹지 않도록 위에 둔다)
@@ -963,12 +964,11 @@ fun NowPlayingScreen(
                 }
             }
         } else {
-            // ── 세로 ───────────────────────────────────────────
+            // ── 세로: 화면 크기에 맞춰 영상/정보가 자동으로 늘어난다 ──────
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 20.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .padding(horizontal = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 PlayerTopBar(
@@ -978,16 +978,18 @@ fun NowPlayingScreen(
                     onBack = onBack,
                     onToggleFavorite = onToggleFavorite,
                 )
+                // 남는 화면 높이를 영상/앨범아트가 전부 차지한다 (화면 크기 자동 맞춤)
                 PlayerMedia(
                     track = track,
                     thumbUrl = state.thumbUrl,
                     playing = state.playing,
                     positionMs = tick.positionMs,
-                    artworkSize = minOf(268.dp, screenWidth - 96.dp).coerceAtLeast(120.dp),
+                    artworkSize = 268.dp,
+                    fillBox = true,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(292.dp)
-                        .padding(vertical = 12.dp),
+                        .weight(1f)
+                        .padding(vertical = 10.dp),
                 )
                 PlayerDetails(
                     state = state,
@@ -1089,13 +1091,23 @@ private fun PlayerMedia(
     artworkSize: Dp,
     modifier: Modifier = Modifier,
     rounded: Boolean = true,
+    zoom: Boolean = false,
+    fillBox: Boolean = false,
 ) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+        // 주어진 영역(화면 크기)에 맞춰 앨범아트 크기를 자동으로 정한다
+        val artSize = if (fillBox) {
+            minOf(maxWidth, maxHeight).coerceAtLeast(96.dp)
+        } else {
+            artworkSize
+        }
+        val corner = if (rounded) 24.dp else 0.dp
+
         if (track == null || track.isCompilation) {
             Artwork(
                 url = thumbUrl,
-                size = artworkSize,
-                corner = 24.dp,
+                size = artSize,
+                corner = corner,
                 maxPx = 720,
             )
         } else {
@@ -1103,6 +1115,7 @@ private fun PlayerMedia(
                 track = track,
                 playing = playing,
                 positionMs = positionMs,
+                zoom = zoom,
                 modifier = Modifier
                     .fillMaxSize()
                     .then(
@@ -1111,8 +1124,8 @@ private fun PlayerMedia(
                 fallback = {
                     Artwork(
                         url = thumbUrl,
-                        size = artworkSize,
-                        corner = 24.dp,
+                        size = artSize,
+                        corner = corner,
                         maxPx = 720,
                     )
                 },

@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -27,6 +28,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -50,8 +52,15 @@ private val videoCache = ConcurrentHashMap<String, String>()
 /** 지금 미리 받는 중인 곡 키 (중복 요청 방지) */
 private val prefetching = ConcurrentHashMap.newKeySet<String>()
 
-/** 화면(Composition)과 무관하게 백그라운드에서 다음 곡 영상을 미리 받는다 */
-private val prefetchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+/**
+ * 다음 곡 영상 주소만 미리 해석한다.
+ *  - 영상 해석(유튜브 서명 해독)은 CPU 를 많이 쓰므로 **한 번에 하나만**, 그것도
+ *    현재 영상이 어느 정도 재생된 뒤에 시작한다. (동시에 돌리면 영상이 끊긴다)
+ */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+private val prefetchScope = CoroutineScope(
+    SupervisorJob() + Dispatchers.IO.limitedParallelism(1),
+)
 
 private fun videoKey(track: Track, quality: String): String = "${track.id}@$quality"
 
@@ -60,15 +69,11 @@ private fun rememberVideo(key: String, url: String) {
     videoCache[key] = url
 }
 
-/**
- * 다음 곡의 영상 주소를 미리 받아 둔다.
- * 곡을 넘겼을 때 검색/해석 때문에 몇 초씩 기다리던 문제를 없앤다.
- */
 private fun prefetchVideo(track: Track, quality: String) {
     if (track.isCompilation) return
     val key = videoKey(track, quality)
     if (videoCache.containsKey(key)) return
-    if (prefetching.size >= 2) return
+    if (prefetching.size >= 1) return
     if (!prefetching.add(key)) return
     prefetchScope.launch {
         try {
@@ -90,7 +95,8 @@ private fun prefetchVideo(track: Track, quality: String) {
  *  - 곡의 뮤직비디오(유튜브) 스트림을 찾아서 **음소거** 로 재생한다.
  *    (소리는 메인 플레이어가 담당 → 두 소리가 겹치지 않는다)
  *  - 메인 플레이어의 재생/일시정지 상태에 맞춰 함께 멈추고 다시 튼다.
- *  - 노래 위치와 어긋나면 계속 다시 맞춘다 (곡을 넘겨도 금방 따라온다)
+ *  - 노래 위치와 크게 어긋날 때만(1.5초 이상) 다시 맞춘다.
+ *    너무 자주 맞추면 영상이 끊겨 보이므로 최소 2초 간격을 둔다.
  *  - 영상을 못 찾거나 403 등으로 실패하면 앨범아트(fallback)를 보여준다.
  *    (모음/플레이리스트 곡은 호출하는 쪽에서 아예 이미지만 그린다)
  */
@@ -101,6 +107,7 @@ fun TrackVideo(
     playing: Boolean,
     positionMs: Long,
     modifier: Modifier = Modifier,
+    zoom: Boolean = false,
     fallback: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -114,7 +121,7 @@ fun TrackVideo(
     // 노래 위치는 계속 바뀌므로 최신 값을 콜백에서 읽는다
     val latestPosition by rememberUpdatedState(positionMs)
 
-    // 영상 주소 찾기 (곡당 한 번) + 다음 곡 미리 받기
+    // 영상 주소 찾기 (곡당 한 번)
     LaunchedEffect(track.id) {
         failed = false
         val key = videoKey(track, quality)
@@ -133,9 +140,6 @@ fun TrackVideo(
                 url = found.url
             }
         }
-        // 다음 곡은 미리 받아 둔다 → 넘기면 바로 재생
-        val next = PlayerBus.peekNextTrack()
-        if (next != null && next.id != track.id) prefetchVideo(next, quality)
     }
 
     // 영상 보는 동안 화면이 꺼지지 않게
@@ -144,16 +148,28 @@ fun TrackVideo(
         onDispose { view.keepScreenOn = false }
     }
 
+    // 지금 영상이 자리를 잡은 뒤에 다음 곡 영상을 미리 받아 둔다
+    // (동시에 하면 현재 영상이 끊기므로 4초 뒤에 시작)
+    LaunchedEffect(track.id, url) {
+        if (url == null) return@LaunchedEffect
+        delay(4_000L)
+        val next = PlayerBus.peekNextTrack()
+        if (next != null && next.id != track.id) prefetchVideo(next, quality)
+    }
+
     val player: ExoPlayer? = remember(url) {
         val streamUrl = url ?: return@remember null
         val factory = DefaultMediaSourceFactory(RangeDataSource.Factory())
-        // 영상은 빨리 뜨는 게 중요하므로 첫 재생 버퍼를 짧게 잡는다
+        // 기본(2.5초)보다 조금 짧게 잡아 첫 화면이 빨리 뜨되,
+        // 너무 짧으면 계속 끊기므로 1초 정도는 버퍼를 허용한다.
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(4_000, 20_000, 400, 800)
+            .setBufferDurationsMs(6_000, 30_000, 1_000, 1_500)
             .build()
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(factory)
             .setLoadControl(loadControl)
+            // 영상은 키프레임 단위로만 이동할 수 있어서, 먼 위치로 튀지 않게 가까운 지점으로 맞춘다
+            .setSeekParameters(SeekParameters.CLOSEST)
             .build()
             .apply {
                 setMediaItem(MediaItem.fromUri(streamUrl))
@@ -182,13 +198,13 @@ fun TrackVideo(
                     if (state == Player.STATE_READY && !firstReady) {
                         firstReady = true
                         val target = latestPosition
-                        if (target > 500L) runCatching { p.seekTo(target) }
+                        if (target > 1_500L) runCatching { p.seekTo(target) }
                     }
                 }
             }
             p.addListener(listener)
             // 화면을 열었을 때 이미 곡이 진행 중이면 그 위치부터 영상을 보여준다
-            if (positionMs > 0L) runCatching { p.seekTo(positionMs) }
+            if (positionMs > 1_500L) runCatching { p.seekTo(positionMs) }
             onDispose {
                 p.removeListener(listener)
                 p.release()
@@ -200,15 +216,17 @@ fun TrackVideo(
         player?.playWhenReady = playing
     }
 
-    // 노래와 영상 위치가 벌어지면 계속 맞춘다 (곡을 넘겨도 금방 따라온다)
+    // 노래와 영상이 크게 어긋날 때만 다시 맞춘다 (자주 맞추면 끊긴다)
     LaunchedEffect(player) {
         val p = player ?: return@LaunchedEffect
         while (true) {
-            delay(400)
-            if (p.playbackState == Player.STATE_READY && p.isPlaying) {
+            delay(1_000)
+            if (p.playbackState == Player.STATE_READY && p.isPlaying && !p.isBuffering) {
                 val target = latestPosition
-                if (target > 0L && abs(p.currentPosition - target) > 700L) {
+                if (target > 1_500L && abs(p.currentPosition - target) > 1_500L) {
                     runCatching { p.seekTo(target) }
+                    // 다시 맞춘 직후에는 버퍼가 다시 차는 동안 기다린다
+                    delay(2_000)
                 }
             }
         }
@@ -231,20 +249,27 @@ fun TrackVideo(
         return
     }
 
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                setShutterBackgroundColor(android.graphics.Color.BLACK)
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-                player?.let { this.player = it }
-            }
-        },
-        update = { it.player = player },
-        modifier = modifier,
-    )
+    // 화면 방향(확대/원본)이 바뀔 때만 뷰를 다시 만든다
+    key(zoom) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    useController = false
+                    resizeMode = if (zoom) {
+                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    } else {
+                        AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                    setShutterBackgroundColor(android.graphics.Color.BLACK)
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    player?.let { this.player = it }
+                }
+            },
+            update = { it.player = player },
+            modifier = modifier,
+        )
+    }
 }
