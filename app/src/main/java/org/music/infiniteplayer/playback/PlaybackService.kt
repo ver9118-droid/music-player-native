@@ -28,8 +28,6 @@ import kotlinx.coroutines.withContext
 import org.music.infiniteplayer.MainActivity
 import org.music.infiniteplayer.core.Images
 import org.music.infiniteplayer.core.Prefs
-import org.music.infiniteplayer.data.LyricLine
-import org.music.infiniteplayer.data.LyricsRepository
 import org.music.infiniteplayer.data.ResolvedAudio
 import org.music.infiniteplayer.data.Track
 import org.music.infiniteplayer.data.YoutubeRepository
@@ -62,7 +60,6 @@ class PlaybackService : MediaSessionService() {
                 }
     )
     private lateinit var youtube: YoutubeRepository
-    private val lyricsRepo = LyricsRepository()
 
     private class Entry(val track: Track) {
         @Volatile var audio: ResolvedAudio? = null
@@ -98,7 +95,6 @@ class PlaybackService : MediaSessionService() {
     private var currentEntry: Entry? = null
     private var userWantsPlay = false
     private var callPaused = false
-    private var lyrics: List<LyricLine> = emptyList()
 
     private var statusText = "대기 중"
     private var errorText = ""
@@ -696,16 +692,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun onTrackChanged(entry: Entry) {
-        lyrics = emptyList()
+        // v3.1.0 : 가사 기능 제거 — 곡이 바뀌면 화면 상태만 갱신한다
         publish()
-        scope.launch {
-            val caption = entry.audio?.captionUrl ?: return@launch
-            val loaded = lyricsRepo.fetch(caption)
-            if (loaded.isNotEmpty() && currentEntry?.track?.id == entry.track.id) {
-                lyrics = loaded
-                publish()
-            }
-        }
     }
 
     // ── 통화 ───────────────────────────────────────────────────
@@ -802,7 +790,6 @@ class PlaybackService : MediaSessionService() {
             volume = volume,
             status = statusText,
             error = errorText,
-            lyrics = lyrics,
             callActive = callPaused,
             downloadProgress = downloadProgress,
             toast = toastText,

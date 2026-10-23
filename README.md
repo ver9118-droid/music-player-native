@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `무한 음악 플레이어 v2.0.0.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> 최신 `app-release.apk` (v3.1.0) 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -66,20 +66,28 @@ app/src/main/java/org/music/infiniteplayer/
 │   └── Images.kt              앨범아트 메모리+디스크 캐시
 ├── data/
 │   ├── Track.kt               곡 모델
-│   ├── Sources.kt             차트 소스 19종
-│   ├── ChartRepository.kt     멜론/지니 차트 파서
-│   ├── YoutubeRepository.kt   InnerTube 검색 + 스트림 해석
-│   └── LyricsRepository.kt    자막 → 노래방 가사
+│   ├── Sources.kt             FLO 스타일 차트/장르/상황 소스
+│   ├── ChartRepository.kt     플로리스트 로더 (유튜브 검색 기반)
+│   ├── YoutubeRepository.kt   InnerTube 검색 + 오디오/영상 스트림 해석
 ├── playback/
 │   ├── PlaybackService.kt     MediaSessionService + 재생목록 윈도우 관리
 │   ├── CallGuard.kt           통화 감시
 │   └── PlayerBus.kt           UI ↔ 서비스 통로
 └── ui/
     ├── RootScreen.kt          화면 전환
-    ├── Screens.kt             홈 / 지금재생 / 설정
+    ├── Screens.kt             FLO 홈 / 지금재생 / 설정
+    ├── TrackVideo.kt          차량 연결 시 노래 영상
     ├── Components.kt          공통 컴포넌트
     └── Theme.kt               다크 테마
 ```
+
+## FLO 스타일 (v3.1.0)
+
+- 홈 상단 탭 **플로 차트 / 장르 / 상황**
+- 연령 필터 **전체 연령 / 1020대 / 3040대 / 5060대**
+- 장르 26종 · 상황 34종 카드 그리드 (누르면 해당 플레이리스트 로드)
+- 차량 블루투스 연결 시 **노래에 맞는 영상**을 지금 재생 화면에 표시 (음소거)
+- 가사 기능은 제거했습니다
 
 ## 빌드
 

@@ -15,8 +15,8 @@ android {
         applicationId = "org.music.infiniteplayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 56
-        versionName = "3.0.0"
+        versionCode = 57
+        versionName = "3.1.0"
         resourceConfigurations += setOf("ko", "en")
     }
 
@@ -105,6 +105,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")
     implementation("androidx.media3:media3-datasource:1.5.1")
+    // 차량 블루투스 연결 시 영상 표시 (PlayerView)
+    implementation("androidx.media3:media3-ui:1.5.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

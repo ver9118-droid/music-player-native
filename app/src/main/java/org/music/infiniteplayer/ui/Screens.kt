@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -35,7 +36,8 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -60,10 +62,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -78,7 +82,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.music.infiniteplayer.data.LyricLine
 import org.music.infiniteplayer.data.Source
 import org.music.infiniteplayer.data.Sources
 import org.music.infiniteplayer.data.Track
@@ -86,15 +89,33 @@ import org.music.infiniteplayer.core.Storage
 import org.music.infiniteplayer.playback.Diagnostics
 import org.music.infiniteplayer.playback.PlaybackTick
 import org.music.infiniteplayer.playback.PlayerState
-import kotlin.math.max
-import kotlin.math.min
 
 // ─────────────────────────────────────────────────────────────
 // 홈 화면
 // ─────────────────────────────────────────────────────────────
 
-private data class SourceItem(val group: String, val source: Source?)
+private const val TAB_CHART = 0
+private const val TAB_GENRE = 1
+private const val TAB_MOOD = 2
 
+private val CARD_COLORS = listOf(
+    Color(0xFF6D5DF6) to Color(0xFF3B2E9E),
+    Color(0xFF2E9E8F) to Color(0xFF155C63),
+    Color(0xFFE0607E) to Color(0xFF7A2D4F),
+    Color(0xFF3B7BD6) to Color(0xFF1B3F7A),
+    Color(0xFFD08A3E) to Color(0xFF6E4418),
+    Color(0xFF8A5BD6) to Color(0xFF43267A),
+    Color(0xFF3E9E5B) to Color(0xFF1B5A34),
+    Color(0xFFC4553F) to Color(0xFF6B2A20),
+)
+
+/**
+ * FLO 스타일 홈.
+ *
+ *  - 상단 탭 : 플로 차트 / 장르 / 상황
+ *  - 연령 필터 : 전체 연령 / 1020대 / 3040대 / 5060대
+ *  - 장르·상황은 카드 그리드로 보여주고, 누르면 그 플레이리스트를 불러온다
+ */
 @Composable
 fun HomeScreen(
     tracks: List<Track>,
@@ -105,6 +126,8 @@ fun HomeScreen(
     searchActive: Boolean,
     searching: Boolean,
     favorites: List<Track>,
+    age: String,
+    onAgeChange: (String) -> Unit,
     onPlayFavorite: (Track) -> Unit,
     onPlayAllFavorites: () -> Unit,
     onOpenFavorites: () -> Unit,
@@ -118,6 +141,9 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onRetry: () -> Unit,
 ) {
+    var tab by rememberSaveable { mutableStateOf(TAB_CHART) }
+    val currentSource = Sources.byKey(sourceKey) ?: Sources.default
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -127,25 +153,34 @@ fun HomeScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 18.dp, end = 8.dp, top = 10.dp, bottom = 2.dp),
+                .padding(start = 18.dp, end = 6.dp, top = 10.dp, bottom = 0.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = "무한 음악 플레이어",
-                    style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    text = "FLO",
+                    color = TextPrimary,
+                    fontSize = 27.sp,
+                    fontWeight = FontWeight.Black,
                 )
                 Text(
                     text = when {
                         searching -> "검색 중..."
                         searchActive -> "검색 결과 ${tracks.size}곡"
-                        loading -> "차트 불러오는 중..."
-                        else -> "${tracks.size}곡"
+                        loading -> "플레이리스트 불러오는 중..."
+                        else -> "${currentSource.label} · ${tracks.size}곡"
                     },
                     color = TextSecondary,
-                    fontSize = 12.5.sp,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onOpenFavorites) {
+                Icon(
+                    Icons.Rounded.Favorite,
+                    "내 즐겨찾기",
+                    tint = if (favorites.isEmpty()) TextSecondary else Accent,
                 )
             }
             IconButton(onClick = onOpenSettings) {
@@ -153,13 +188,18 @@ fun HomeScreen(
             }
         }
 
-        // 즐겨찾기 바로가기 (메인 화면 상단)
-        FavoritesStrip(
-            favorites = favorites,
-            onPlayFavorite = onPlayFavorite,
-            onPlayAll = onPlayAllFavorites,
-            onOpenAll = onOpenFavorites,
-        )
+        // 상단 탭 (플로 차트 / 장르 / 상황)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FloTab("플로 차트", tab == TAB_CHART) { tab = TAB_CHART }
+            FloTab("장르", tab == TAB_GENRE) { tab = TAB_GENRE }
+            FloTab("상황", tab == TAB_MOOD) { tab = TAB_MOOD }
+        }
 
         // 검색창 (통합검색 : 노래관련 영상만)
         SearchField(
@@ -169,14 +209,14 @@ fun HomeScreen(
             onSubmit = onSearchSubmit,
         )
 
-        // 소스 선택 (검색 중에는 숨김)
+        // 연령 필터 / 검색 상태
         if (!searchActive) {
-            SourceChips(sourceKey = sourceKey, onSelect = onSelectSource)
+            AgeFilterRow(age = age, onAgeChange = onAgeChange, onOpenSettings = onOpenSettings)
         } else {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 StatusChip("검색: $searchQuery", Accent)
@@ -222,29 +262,54 @@ fun HomeScreen(
             }
         }
 
-        // 차트 목록
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            state = rememberLazyListState(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 12.dp),
-        ) {
-            itemsIndexed(tracks, key = { index, t -> "${t.id}#$index" }) { index, track ->
-                TrackRow(
-                    track = track,
-                    rank = track.rank.takeIf { it > 0 } ?: (index + 1),
-                    playing = state.playing && state.index == index,
-                    active = state.index == index,
-                    favorite = favorites.any { it.id == track.id },
-                    onToggleFavorite = { onToggleFavorite(track) },
-                    onClick = { onTrackClick(index) },
+        // 내용
+        if (searchActive) {
+            TrackList(
+                modifier = Modifier.weight(1f),
+                tracks = tracks,
+                state = state,
+                favorites = favorites,
+                loading = loading || searching,
+                emptyText = "검색 결과가 없습니다",
+                onToggleFavorite = onToggleFavorite,
+                onTrackClick = onTrackClick,
+            )
+        } else {
+            when (tab) {
+                TAB_GENRE -> CategoryGrid(
+                    modifier = Modifier.weight(1f),
+                    title = "장르",
+                    subtitle = "듣고 싶은 장르를 골라 보세요",
+                    sources = Sources.floGenres,
+                    onSelect = { key ->
+                        onSelectSource(key)
+                        tab = TAB_CHART
+                    },
                 )
-            }
-            if (tracks.isEmpty() && !loading) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(top = 60.dp), contentAlignment = Alignment.Center) {
-                        Text("표시할 차트가 없습니다", color = TextSecondary, fontSize = 14.sp)
-                    }
-                }
+                TAB_MOOD -> CategoryGrid(
+                    modifier = Modifier.weight(1f),
+                    title = "상황",
+                    subtitle = "지금 이 순간에 어울리는 플레이리스트",
+                    sources = Sources.floMoods,
+                    onSelect = { key ->
+                        onSelectSource(key)
+                        tab = TAB_CHART
+                    },
+                )
+                else -> ChartTab(
+                    modifier = Modifier.weight(1f),
+                    tracks = tracks,
+                    state = state,
+                    sourceKey = sourceKey,
+                    loading = loading,
+                    favorites = favorites,
+                    onPlayFavorite = onPlayFavorite,
+                    onPlayAllFavorites = onPlayAllFavorites,
+                    onOpenFavorites = onOpenFavorites,
+                    onToggleFavorite = onToggleFavorite,
+                    onSelectSource = onSelectSource,
+                    onTrackClick = onTrackClick,
+                )
             }
         }
 
@@ -252,6 +317,352 @@ fun HomeScreen(
         AnimatedVisibility(visible = state.title.isNotBlank()) {
             MiniPlayer(state = state, onOpen = onOpenPlayer)
         }
+    }
+}
+
+@Composable
+private fun FloTab(text: String, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = text,
+            color = if (selected) TextPrimary else TextSecondary,
+            fontSize = 15.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        )
+        Spacer(Modifier.height(5.dp))
+        Box(
+            modifier = Modifier
+                .width(if (selected) 18.dp else 0.dp)
+                .height(2.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(if (selected) Accent else Color.Transparent),
+        )
+    }
+}
+
+private val AGE_OPTIONS = listOf(
+    Sources.AGE_ALL to "전체 연령",
+    Sources.AGE_1020 to "1020대",
+    Sources.AGE_3040 to "3040대",
+    Sources.AGE_5060 to "5060대",
+)
+
+@Composable
+private fun AgeFilterRow(
+    age: String,
+    onAgeChange: (String) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(AGE_OPTIONS) { (key, label) ->
+            val selected = key == age
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (selected) TextPrimary else Surface1)
+                    .clickable { onAgeChange(key) }
+                    .padding(horizontal = 11.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    text = label,
+                    color = if (selected) Bg else TextSecondary,
+                    fontSize = 11.5.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                )
+            }
+        }
+        item {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Surface1)
+                    .clickable(onClick = onOpenSettings)
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Text("차트설정", color = TextSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChartTab(
+    modifier: Modifier,
+    tracks: List<Track>,
+    state: PlayerState,
+    sourceKey: String,
+    loading: Boolean,
+    favorites: List<Track>,
+    onPlayFavorite: (Track) -> Unit,
+    onPlayAllFavorites: () -> Unit,
+    onOpenFavorites: () -> Unit,
+    onToggleFavorite: (Track) -> Unit,
+    onSelectSource: (String) -> Unit,
+    onTrackClick: (Int) -> Unit,
+) {
+    val source = Sources.byKey(sourceKey) ?: Sources.default
+    LazyColumn(
+        modifier = modifier,
+        state = rememberLazyListState(),
+        contentPadding = PaddingValues(bottom = 12.dp),
+    ) {
+        item {
+            FavoritesStrip(
+                favorites = favorites,
+                onPlayFavorite = onPlayFavorite,
+                onPlayAll = onPlayAllFavorites,
+                onOpenAll = onOpenFavorites,
+            )
+        }
+        item {
+            FloChartChips(sourceKey = sourceKey, onSelect = onSelectSource)
+        }
+        item {
+            ChartBanner(
+                title = source.label,
+                count = tracks.size,
+                loading = loading,
+                onPlayAll = { if (tracks.isNotEmpty()) onTrackClick(0) },
+            )
+        }
+        itemsIndexed(tracks, key = { index, t -> "${t.id}#$index" }) { index, track ->
+            TrackRow(
+                track = track,
+                rank = track.rank.takeIf { it > 0 } ?: (index + 1),
+                playing = state.playing && state.track?.id == track.id,
+                active = state.track?.id == track.id,
+                favorite = favorites.any { it.id == track.id },
+                onToggleFavorite = { onToggleFavorite(track) },
+                onClick = { onTrackClick(index) },
+            )
+        }
+        if (tracks.isEmpty() && !loading) {
+            item { EmptyHint("표시할 곡이 없습니다") }
+        }
+    }
+}
+
+@Composable
+private fun TrackList(
+    modifier: Modifier,
+    tracks: List<Track>,
+    state: PlayerState,
+    favorites: List<Track>,
+    loading: Boolean,
+    emptyText: String,
+    onToggleFavorite: (Track) -> Unit,
+    onTrackClick: (Int) -> Unit,
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 12.dp),
+    ) {
+        itemsIndexed(tracks, key = { index, t -> "${t.id}#$index" }) { index, track ->
+            TrackRow(
+                track = track,
+                rank = track.rank.takeIf { it > 0 } ?: (index + 1),
+                playing = state.playing && state.track?.id == track.id,
+                active = state.track?.id == track.id,
+                favorite = favorites.any { it.id == track.id },
+                onToggleFavorite = { onToggleFavorite(track) },
+                onClick = { onTrackClick(index) },
+            )
+        }
+        if (tracks.isEmpty() && !loading) {
+            item { EmptyHint(emptyText) }
+        }
+    }
+}
+
+@Composable
+private fun FloChartChips(sourceKey: String, onSelect: (String) -> Unit) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp, bottom = 4.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(Sources.floChart) { src ->
+            val selected = src.key == sourceKey
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (selected) Accent else Surface1)
+                    .clickable { onSelect(src.key) }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    text = src.label,
+                    color = if (selected) Color.White else TextSecondary,
+                    fontSize = 12.5.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChartBanner(
+    title: String,
+    count: Int,
+    loading: Boolean,
+    onPlayAll: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF4B3FD4), Color(0xFF8B3FD4))))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (loading) "불러오는 중..." else "$count곡 · FLO 스타일",
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 11.5.sp,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.White)
+                .clickable(onClick = onPlayAll)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Rounded.PlayArrow,
+                    null,
+                    tint = Color(0xFF2B1E80),
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "전체 재생",
+                    color = Color(0xFF2B1E80),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryGrid(
+    modifier: Modifier,
+    title: String,
+    subtitle: String,
+    sources: List<Source>,
+    onSelect: (String) -> Unit,
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(bottom = 16.dp),
+    ) {
+        item {
+            Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
+                Text(title, color = TextPrimary, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Text(subtitle, color = TextSecondary, fontSize = 12.sp)
+            }
+        }
+        items(sources.chunked(2)) { row ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                row.forEach { src ->
+                    CategoryCard(
+                        source = src,
+                        index = sources.indexOf(src),
+                        modifier = Modifier.weight(1f),
+                        onClick = { onSelect(src.key) },
+                    )
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryCard(
+    source: Source,
+    index: Int,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    val (c1, c2) = CARD_COLORS[index % CARD_COLORS.size]
+    Box(
+        modifier = modifier
+            .height(96.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Brush.linearGradient(listOf(c1, c2)))
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+    ) {
+        Icon(
+            Icons.Rounded.MusicNote,
+            null,
+            tint = Color.White.copy(alpha = 0.30f),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(30.dp),
+        )
+        Column(Modifier.align(Alignment.BottomStart)) {
+            Text(
+                text = source.label,
+                color = Color.White,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = if (source.group == Sources.GROUP_FLO_GENRE) "장르 인기곡" else "상황 플레이리스트",
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 10.5.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyHint(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 60.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = TextSecondary, fontSize = 14.sp)
     }
 }
 
@@ -621,58 +1032,6 @@ private fun SearchField(
 }
 
 @Composable
-private fun SourceChips(sourceKey: String, onSelect: (String) -> Unit) {    val items = remember {
-        buildList {
-            var lastGroup = ""
-            Sources.all.forEach { src ->
-                if (src.group != lastGroup) {
-                    add(SourceItem(src.group, null))
-                    lastGroup = src.group
-                }
-                add(SourceItem(src.group, src))
-            }
-        }
-    }
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items(items) { item ->
-            val src = item.source
-            if (src == null) {
-                Text(
-                    text = item.group,
-                    color = TextSecondary.copy(alpha = 0.75f),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(start = 6.dp, end = 2.dp),
-                )
-            } else {
-                val selected = src.key == sourceKey
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (selected) Accent else Surface1)
-                        .clickable { onSelect(src.key) }
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                ) {
-                    Text(
-                        text = src.label,
-                        color = if (selected) Color.White else TextSecondary,
-                        fontSize = 13.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit) {
     Row(
         modifier = Modifier
@@ -745,11 +1104,15 @@ fun NowPlayingScreen(
     onShuffle: (Boolean) -> Unit,
     onRepeat: (String) -> Unit,
     onInfinite: (Boolean) -> Unit,
+    carConnected: Boolean,
+    videoEnabled: Boolean,
 ) {
     // 재생 위치는 이 화면에서만 구독 (홈 화면 재렌더링 방지)
     val tick by org.music.infiniteplayer.playback.PlayerBus.tick
         .collectAsStateWithLifecycle()
-    var showLyrics by remember { mutableStateOf(false) }
+    // 영상 : 차량(블루투스) 연결 시 자동 표시, 상단 버튼으로 직접 켜고 끌 수 있다
+    var videoOverride by remember { mutableStateOf<Boolean?>(null) }
+    val showVideo = videoOverride ?: (videoEnabled && carConnected)
 
     Column(
         modifier = Modifier
@@ -783,16 +1146,16 @@ fun NowPlayingScreen(
                     tint = if (isFavorite) Accent else TextSecondary,
                 )
             }
-            IconButton(onClick = { showLyrics = !showLyrics }) {
+            IconButton(onClick = { videoOverride = !showVideo }) {
                 Icon(
-                    Icons.Rounded.Lyrics,
-                    "가사",
-                    tint = if (showLyrics) Accent else TextSecondary,
+                    Icons.Rounded.Movie,
+                    "노래 영상",
+                    tint = if (showVideo) Accent else TextSecondary,
                 )
             }
         }
 
-        // 앨범아트 / 가사
+        // 앨범아트 / 노래 영상
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -800,11 +1163,15 @@ fun NowPlayingScreen(
                 .padding(vertical = 12.dp),
             contentAlignment = Alignment.Center,
         ) {
-            if (showLyrics) {
-                LyricsPane(
-                    lines = state.lyrics,
-                    positionMs = tick.positionMs,
-                    modifier = Modifier.fillMaxSize(),
+            if (showVideo) {
+                TrackVideo(
+                    videoId = state.track?.videoId.orEmpty(),
+                    title = state.title,
+                    artist = state.artist,
+                    thumbUrl = state.thumbUrl,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f),
                 )
             } else {
                 Artwork(
@@ -936,6 +1303,7 @@ fun NowPlayingScreen(
                 color = if (state.error.isNotBlank()) Danger else AccentSoft,
             )
             if (state.infinite) StatusChip("무한 재생", Accent)
+            if (showVideo && carConnected) StatusChip("차량 영상", Accent)
             if (state.callActive) StatusChip("통화 중", Danger)
             if (diag.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
         }
@@ -1259,39 +1627,6 @@ private fun SmallChip(
 }
 
 @Composable
-private fun LyricsPane(
-    lines: List<LyricLine>,
-    positionMs: Long,
-    modifier: Modifier = Modifier,
-) {
-    if (lines.isEmpty()) {
-        Box(modifier, contentAlignment = Alignment.Center) {
-            Text("가사를 불러오는 중입니다...", color = TextSecondary, fontSize = 14.sp)
-        }
-        return
-    }
-    val idx = lines.indexOfFirst { it.startMs > positionMs }
-        .let { if (it < 0) lines.size - 1 else max(0, it - 1) }
-    val from = max(0, idx - 2)
-    val to = min(lines.size, idx + 4)
-
-    Column(
-        modifier = modifier.padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        for (i in from until to) {
-            val active = i == idx
-            Text(
-                text = lines[i].text,
-                color = if (active) TextPrimary else TextSecondary.copy(alpha = 0.38f),
-                fontSize = if (active) 21.sp else 17.sp,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-            )
-        }
-    }
-}
-
-@Composable
 private fun SeekBar(positionMs: Long, durationMs: Long, onSeek: (Long) -> Unit) {
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableStateOf(0f) }
@@ -1334,6 +1669,8 @@ fun SettingsScreen(
     onQuality: (String) -> Unit,
     favorites: List<Track>,
     onOpenFavorites: () -> Unit,
+    videoEnabled: Boolean,
+    onVideoEnabled: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1430,13 +1767,28 @@ fun SettingsScreen(
 
             item {
                 SectionTitle("차량 블루투스 연결")
+                SettingRow(
+                    title = "노래에 맞는 영상",
+                    subtitle = if (videoEnabled) {
+                        "차량에 연결되면 지금 재생 화면에 뮤직비디오가 함께 나옵니다 (소리는 차량에서)"
+                    } else {
+                        "꺼짐 · 영상 없이 앨범아트만 표시"
+                    },
+                ) {
+                    Switch(
+                        checked = videoEnabled,
+                        onCheckedChange = onVideoEnabled,
+                        colors = switchColors(),
+                    )
+                }
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
                     Text(
                         "1. 휴대전화 설정에서 블루투스를 켭니다\n" +
                                 "2. 블루투스 화면에서 차량을 검색해 연결합니다\n" +
                                 "3. 차량 오디오 소스에서 '무한 음악 플레이어'를 선택합니다\n" +
                                 "4. 스티어링휠이나 키패드로 재생·일시정지·곡 전환이 됩니다\n" +
-                                "5. 차량 화면에 곡 정보와 앨범아트가 표시됩니다",
+                                "5. 차량 화면에 곡 정보가, 휴대전화 화면에 노래 영상이 표시됩니다\n" +
+                                "   (영상은 음소거로 재생되어 차량 소리와 겹치지 않습니다)",
                         color = TextSecondary,
                         fontSize = 12.5.sp,
                         lineHeight = 19.sp,

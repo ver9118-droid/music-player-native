@@ -2,7 +2,6 @@ package org.music.infiniteplayer.playback
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import org.music.infiniteplayer.data.LyricLine
 import org.music.infiniteplayer.data.Track
 
 /**
@@ -53,7 +52,6 @@ data class PlayerState(
     val volume: Float = 0.85f,
     val status: String = "",
     val error: String = "",
-    val lyrics: List<LyricLine> = emptyList(),
     val callActive: Boolean = false,
     val downloadProgress: Int = -1,       // 로컬 다운로드 진행률 (-1 = 없음)
     val toast: String = "",               // 사용자에게 보여줄 메시지
