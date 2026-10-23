@@ -8,8 +8,12 @@ import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.verticalScroll
@@ -86,10 +90,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -781,7 +790,6 @@ fun NowPlayingScreen(
     onNext: () -> Unit,
     onPrev: () -> Unit,
     onSeek: (Long) -> Unit,
-    onVolume: (Float) -> Unit,
     onShuffle: (Boolean) -> Unit,
     onRepeat: (String) -> Unit,
     onInfinite: (Boolean) -> Unit,
@@ -795,6 +803,18 @@ fun NowPlayingScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val activity = remember(context) { context.findActivity() }
+
+    // 재생 화면이 열려 있는 동안은 화면이 자동으로 꺼지지 않게 한다
+    DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+
+    // 화면 전체가 자동으로 포커스를 갖도록 (어디를 눌러도 바로 반응)
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching { focusRequester.requestFocus() }
+    }
 
     // 화면 방향 잠금 (가로로 돌린 상태에서 고정)
     var orientationLocked by rememberSaveable { mutableStateOf(false) }
@@ -847,6 +867,8 @@ fun NowPlayingScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Bg)
+            .focusRequester(focusRequester)
+            .focusable()
             .then(if (isLandscape) Modifier else Modifier.systemBarsPadding()),
     ) {
         val screenWidth = maxWidth
@@ -933,7 +955,6 @@ fun NowPlayingScreen(
                                 onNext = onNext,
                                 onPrev = onPrev,
                                 onSeek = onSeek,
-                                onVolume = onVolume,
                                 onShuffle = onShuffle,
                                 onRepeat = onRepeat,
                             )
@@ -981,7 +1002,6 @@ fun NowPlayingScreen(
                     onNext = onNext,
                     onPrev = onPrev,
                     onSeek = onSeek,
-                    onVolume = onVolume,
                     onShuffle = onShuffle,
                     onRepeat = onRepeat,
                 )
@@ -1121,7 +1141,6 @@ private fun PlayerDetails(
     onNext: () -> Unit,
     onPrev: () -> Unit,
     onSeek: (Long) -> Unit,
-    onVolume: (Float) -> Unit,
     onShuffle: (Boolean) -> Unit,
     onRepeat: (String) -> Unit,
 ) {
@@ -1217,24 +1236,6 @@ private fun PlayerDetails(
 
     if (!compact) {
         Spacer(Modifier.height(10.dp))
-
-        // 볼륨
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.VolumeDown, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
-            Slider(
-                value = state.volume,
-                onValueChange = onVolume,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 10.dp),
-                colors = SliderDefaults.colors(
-                    thumbColor = Accent,
-                    activeTrackColor = Accent,
-                    inactiveTrackColor = Surface2,
-                ),
-            )
-            Icon(Icons.Rounded.VolumeUp, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
-        }
 
         // 상태 표시
         Row(
@@ -1625,24 +1626,72 @@ private fun SeekBar(positionMs: Long, durationMs: Long, onSeek: (Long) -> Unit) 
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableStateOf(0f) }
     val duration = durationMs.coerceAtLeast(1L).toFloat()
-    val value = if (dragging) dragValue else positionMs.toFloat().coerceIn(0f, duration)
-    Slider(
-        value = value,
-        onValueChange = {
-            dragging = true
-            dragValue = it
-        },
-        onValueChangeFinished = {
-            dragging = false
-            onSeek(dragValue.toLong())
-        },
-        valueRange = 0f..duration,
-        colors = SliderDefaults.colors(
-            thumbColor = Accent,
-            activeTrackColor = Accent,
-            inactiveTrackColor = Surface2,
-        ),
-    )
+    val value = (if (dragging) dragValue else positionMs.toFloat()).coerceIn(0f, duration)
+    val fraction = (value / duration).coerceIn(0f, 1f)
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(22.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        val widthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+
+        fun valueAt(x: Float): Float = (x / widthPx).coerceIn(0f, 1f) * duration
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(widthPx, duration) {
+                    detectTapGestures { offset ->
+                        onSeek(valueAt(offset.x).toLong())
+                    }
+                }
+                .pointerInput(widthPx, duration) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { offset ->
+                            dragging = true
+                            dragValue = valueAt(offset.x)
+                        },
+                        onDragEnd = {
+                            dragging = false
+                            onSeek(dragValue.toLong())
+                        },
+                        onDragCancel = { dragging = false },
+                        onHorizontalDrag = { change, _ ->
+                            dragValue = valueAt(change.position.x)
+                        },
+                    )
+                },
+        ) {
+            val centerY = size.height / 2f
+            val trackHeight = 4.dp.toPx()
+            val thumbRadius = 5.dp.toPx()
+            val played = size.width * fraction
+
+            drawLine(
+                color = Surface2,
+                start = Offset(0f, centerY),
+                end = Offset(size.width, centerY),
+                strokeWidth = trackHeight,
+                cap = StrokeCap.Round,
+            )
+            if (played > 0f) {
+                drawLine(
+                    color = Accent,
+                    start = Offset(0f, centerY),
+                    end = Offset(played, centerY),
+                    strokeWidth = trackHeight,
+                    cap = StrokeCap.Round,
+                )
+            }
+            drawCircle(
+                color = Accent,
+                radius = if (dragging) thumbRadius * 1.25f else thumbRadius,
+                center = Offset(played.coerceIn(thumbRadius, size.width - thumbRadius), centerY),
+            )
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────

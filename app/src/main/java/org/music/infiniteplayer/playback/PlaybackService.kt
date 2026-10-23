@@ -376,6 +376,24 @@ class PlaybackService : MediaSessionService() {
         publish()
     }
 
+    /**
+     * 다음에 재생될 곡 (지금 재생 화면이 영상을 미리 받아두는 데 쓴다).
+     * 실제 재생 순서(order)를 그대로 따르므로 셔플/반복 설정과도 일치한다.
+     */
+    fun peekNextTrack(): Track? {
+        if (order.isEmpty() || pos < 0) return null
+        val target = pos + 1
+        val slot = if (target < order.size) {
+            target
+        } else if (canWrap) {
+            0
+        } else {
+            return null
+        }
+        val index = order.getOrNull(slot) ?: return null
+        return entries.getOrNull(index)?.track
+    }
+
     fun setVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
         player?.volume = volume

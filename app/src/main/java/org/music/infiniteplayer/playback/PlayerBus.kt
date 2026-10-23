@@ -127,6 +127,17 @@ object PlayerBus {
         _state.value = next
     }
 
+    /** 다음 곡 (없으면 null) — 영상 미리 받기용 */
+    fun peekNextTrack(): org.music.infiniteplayer.data.Track? {
+        val svc = service ?: return null
+        return try {
+            svc.peekNextTrack()
+        } catch (e: Exception) {
+            org.music.infiniteplayer.core.CrashLog.save(e)
+            null
+        }
+    }
+
     internal fun publishTick(next: PlaybackTick) {
         _tick.value = next
     }

@@ -189,7 +189,6 @@ fun RootScreen() {
                 onNext = { PlayerBus.post { it.next() } },
                 onPrev = { PlayerBus.post { it.prev() } },
                 onSeek = { ms -> PlayerBus.post { it.seekTo(ms) } },
-                onVolume = { v -> PlayerBus.post { it.setVolume(v) } },
                 onShuffle = { b -> PlayerBus.post { it.setShuffle(b) } },
                 onRepeat = { m -> PlayerBus.post { it.setRepeat(m) } },
                 onInfinite = { b -> PlayerBus.post { it.setInfinite(b) } },
