@@ -109,6 +109,8 @@ class PlaybackService : MediaSessionService() {
     // ── 진단/복구 ────────────────────────────────────────────
     private var streamProbe = "확인 안 됨"
     private var streamInfo = ""
+    private var selfTestText = ""
+    private var selfTestRunning = false
     private var retryCount = 0
     private var downloadProgress = -1
     private var preparing = false
@@ -398,6 +400,19 @@ class PlaybackService : MediaSessionService() {
             }
         }
         publish()
+    }
+
+    /**
+     * 목록을 섞어서 처음부터 재생 (즐겨찾기 "셔플 재생").
+     *
+     * 셔플을 켠 뒤 큐를 넣어야 rebuildOrder() 가 섞는다.
+     * (켜자마자 setShuffle() 이 현재 곡을 다시 잡으려 하므로 setQueue 로 한 번에 처리)
+     */
+    fun playShuffled(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        shuffleOn = true
+        Prefs.shuffle = true
+        setQueue(tracks, 0)
     }
 
     fun setRepeat(mode: String) {
@@ -775,6 +790,7 @@ class PlaybackService : MediaSessionService() {
             buffering = p?.playbackState == Player.STATE_BUFFERING,
             index = order.getOrNull(pos) ?: -1,
             count = entries.size,
+            track = track,
             title = track?.title ?: "",
             artist = track?.artist ?: "",
             album = track?.album ?: "",
@@ -855,8 +871,71 @@ class PlaybackService : MediaSessionService() {
                     notificationState = notificationStateText(),
                     uiLatency = uiLatencyText(),
                     queueInfo = queue,
+                    selfTest = selfTestText,
                 )
             )
+        }
+    }
+
+    /**
+     * 연결 테스트 : 유튜브 접속 → 검색 → 음원 추출 → 음원 서버 접속까지
+     * 어디서 막히는지 한 번에 확인한다. (진단 화면의 "연결 테스트" 버튼)
+     */
+    fun runSelfTest() {
+        if (selfTestRunning) return
+        selfTestRunning = true
+        selfTestText = "테스트 중..."
+        publish()
+        refreshDiagnostics()
+        scope.launch {
+            val sb = StringBuilder()
+            // 1) 유튜브 접속
+            try {
+                val html = org.music.infiniteplayer.core.Net.get(
+                    "https://www.youtube.com/",
+                    mapOf("User-Agent" to org.music.infiniteplayer.core.Net.UA_DESKTOP),
+                )
+                sb.appendLine("1) 유튜브 접속: OK (${html.length / 1024}KB)")
+            } catch (e: Exception) {
+                sb.appendLine("1) 유튜브 접속: 실패 · ${e.message ?: e.javaClass.simpleName}")
+            }
+            // 2) 검색
+            var probe: Track? = null
+            try {
+                val found = youtube.search("아이유 좋은날", 5)
+                sb.appendLine("2) 검색: ${found.size}곡")
+                probe = found.firstOrNull()
+            } catch (e: Exception) {
+                sb.appendLine("2) 검색: 실패 · ${e.message ?: e.javaClass.simpleName}")
+            }
+            // 3) 음원 추출 + 4) 음원 서버 접속
+            try {
+                val audio = probe?.let { youtube.resolve(it) }
+                if (audio == null) {
+                    sb.appendLine("3) 음원 추출: 실패 (재생 주소 없음)")
+                } else {
+                    sb.appendLine("3) 음원 추출: OK (itag ${audio.itag})")
+                    val code = try {
+                        val conn = java.net.URL(audio.url).openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 10_000
+                        conn.readTimeout = 10_000
+                        conn.setRequestProperty("Range", "bytes=0-1023")
+                        val c = conn.responseCode
+                        runCatching { conn.inputStream?.close() }
+                        conn.disconnect()
+                        "HTTP $c"
+                    } catch (e: Exception) {
+                        "실패 · ${e.message ?: e.javaClass.simpleName}"
+                    }
+                    sb.appendLine("4) 음원 서버: $code")
+                }
+            } catch (e: Exception) {
+                sb.appendLine("3) 음원 추출: 예외 · ${e.message ?: e.javaClass.simpleName}")
+            }
+            selfTestText = sb.toString().trim()
+            selfTestRunning = false
+            publish()
+            refreshDiagnostics()
         }
     }
 

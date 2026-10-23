@@ -34,6 +34,7 @@ private const val PAGE_HOME = 0
 private const val PAGE_PLAYER = 1
 private const val PAGE_SETTINGS = 2
 private const val PAGE_DIAG = 3
+private const val PAGE_FAVORITES = 4
 
 @Composable
 fun RootScreen() {
@@ -127,6 +128,17 @@ fun RootScreen() {
         }
     }
 
+    // 즐겨찾기 추가/해제 (하트)
+    val toggleFavorite: (Track) -> Unit = { track ->
+        val added = Prefs.toggleFavoriteTrack(track.toJson())
+        favorites = loadFavorites()
+        android.widget.Toast.makeText(
+            toastContext,
+            if (added) "즐겨찾기에 추가했습니다" else "즐겨찾기에서 삭제했습니다",
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
+
     // 즐겨찾기 곡 재생 : 누른 곡부터 즐겨찾기 목록 전체를 재생
     val playFavorite: (Track) -> Unit = { track ->
         val list = favorites
@@ -137,6 +149,14 @@ fun RootScreen() {
             PlayerBus.post { it.setQueue(list, if (idx < 0) 0 else idx) }
         }
         page = PAGE_PLAYER
+    }
+
+    // 즐겨찾기 목록을 섞어서 재생
+    val playFavoritesShuffled: () -> Unit = {
+        if (favorites.isNotEmpty()) {
+            PlayerBus.post { it.playShuffled(favorites) }
+            page = PAGE_PLAYER
+        }
     }
 
     // 상태바/네비게이션바 영역과 겹치지 않도록 inset 적용
@@ -150,14 +170,9 @@ fun RootScreen() {
             PAGE_PLAYER -> NowPlayingScreen(
                 state = state,
                 diag = diag,
-                isFavorite = favorites.any { it.id == currentTrackId(state, tracks) },
+                isFavorite = state.track?.let { t -> favorites.any { it.id == t.id } } == true,
                 onToggleFavorite = {
-                    val id = currentTrackId(state, tracks)
-                    val track = tracks.firstOrNull { it.id == id }
-                    if (track != null) {
-                        Prefs.toggleFavoriteTrack(track.toJson())
-                        favorites = loadFavorites()
-                    }
+                    state.track?.let { t -> toggleFavorite(t) }
                 },
                 onRetry = { PlayerBus.post { it.retryCurrent() } },
                 onDownload = { PlayerBus.post { it.downloadToDevice() } },
@@ -188,11 +203,23 @@ fun RootScreen() {
                     quality = q
                     Prefs.quality = q
                 },
-                onRemoveFavorite = { track ->
-                    Prefs.toggleFavoriteTrack(track.toJson())
-                    favorites = loadFavorites()
+                onOpenFavorites = { page = PAGE_FAVORITES },
+            )
+
+            PAGE_FAVORITES -> FavoritesScreen(
+                favorites = favorites,
+                state = state,
+                onBack = { page = PAGE_HOME },
+                onPlayFrom = playFavorite,
+                onPlayAll = {
+                    if (favorites.isNotEmpty()) {
+                        PlayerBus.post { it.setQueue(favorites, 0) }
+                        page = PAGE_PLAYER
+                    }
                 },
-                onPlayFavorite = playFavorite,
+                onShufflePlay = playFavoritesShuffled,
+                onRemoveFavorite = { track -> toggleFavorite(track) },
+                onOpenHome = { page = PAGE_HOME },
             )
 
             PAGE_DIAG -> DiagnosticsScreen(
@@ -201,6 +228,7 @@ fun RootScreen() {
                 onBack = { page = PAGE_SETTINGS },
                 onRetry = { PlayerBus.post { it.retryCurrent() } },
                 onDownload = { PlayerBus.post { it.downloadAndPlay() } },
+                onSelfTest = { PlayerBus.post { it.runSelfTest() } },
             )
 
             else -> {
@@ -221,6 +249,8 @@ fun RootScreen() {
                             page = PAGE_PLAYER
                         }
                     },
+                    onOpenFavorites = { page = PAGE_FAVORITES },
+                    onToggleFavorite = toggleFavorite,
                     onQueryChange = { q ->
                         searchQuery = q
                         if (q.isBlank()) {
@@ -272,12 +302,6 @@ fun RootScreen() {
             }
         }
     }
-}
-
-/** 현재 재생 중인 곡의 id (목록에서 찾기) */
-private fun currentTrackId(state: PlayerState, tracks: List<Track>): String {
-    if (state.index in tracks.indices) return tracks[state.index].id
-    return tracks.firstOrNull { it.title == state.title && it.artist == state.artist }?.id ?: ""
 }
 
 private fun loadFavorites(): List<Track> = Prefs.favoriteTracks().map { Track.fromJson(it) }

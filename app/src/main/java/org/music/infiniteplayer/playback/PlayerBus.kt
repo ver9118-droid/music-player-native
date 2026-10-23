@@ -3,6 +3,7 @@ package org.music.infiniteplayer.playback
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.music.infiniteplayer.data.LyricLine
+import org.music.infiniteplayer.data.Track
 
 /**
  * 자주 바뀌는 재생 정보 (위치/길이).
@@ -30,6 +31,7 @@ data class Diagnostics(
     val notificationState: String = "",
     val uiLatency: String = "",
     val queueInfo: String = "",
+    val selfTest: String = "",
 )
 
 /** UI 가 보는 재생 상태 (曲目 정보/설정 등 자주 안 바뀌는 것들). */
@@ -38,6 +40,8 @@ data class PlayerState(
     val buffering: Boolean = false,
     val index: Int = -1,
     val count: Int = 0,
+    // 현재 재생 중인 곡 (즐겨찾기 여부 표시 등에 쓴다)
+    val track: Track? = null,
     val title: String = "",
     val artist: String = "",
     val album: String = "",

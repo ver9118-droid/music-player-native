@@ -20,8 +20,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -94,6 +97,8 @@ fun TrackRow(
     rank: Int,
     playing: Boolean,
     active: Boolean,
+    favorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val tint by animateColorAsState(
@@ -136,6 +141,19 @@ fun TrackRow(
                     fontSize = 12.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (onToggleFavorite != null) {
+            IconButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.size(38.dp),
+            ) {
+                Icon(
+                    imageVector = if (favorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    contentDescription = if (favorite) "즐겨찾기 해제" else "즐겨찾기 추가",
+                    tint = if (favorite) Accent else TextSecondary.copy(alpha = 0.65f),
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }
