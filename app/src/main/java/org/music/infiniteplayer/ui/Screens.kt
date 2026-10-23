@@ -1271,7 +1271,7 @@ private fun RingtoneDialog(
                 Slider(
                     value = start.coerceIn(0L, maxStart).toFloat(),
                     onValueChange = { start = it.toLong() },
-                    valueRange = 0f..maxStart.coerceAtLeast(1f).toFloat(),
+                    valueRange = 0f..maxStart.coerceAtLeast(1L).toFloat(),
                     colors = SliderDefaults.colors(
                         thumbColor = Accent,
                         activeTrackColor = Accent,
