@@ -776,7 +776,9 @@ fun NowPlayingScreen(
             .fillMaxSize()
             .background(Bg),
     ) {
-        val landscape = maxWidth > maxHeight
+        val screenWidth = maxWidth
+        val screenHeight = maxHeight
+        val landscape = screenWidth > screenHeight
 
         if (landscape) {
             Column(
@@ -801,7 +803,7 @@ fun NowPlayingScreen(
                         thumbUrl = state.thumbUrl,
                         playing = state.playing,
                         positionMs = tick.positionMs,
-                        artworkSize = minOf(maxHeight - 120.dp, maxWidth / 2 - 48.dp)
+                        artworkSize = minOf(screenHeight - 120.dp, screenWidth / 2 - 48.dp)
                             .coerceAtLeast(96.dp),
                         modifier = Modifier
                             .weight(1f)
@@ -854,7 +856,7 @@ fun NowPlayingScreen(
                     thumbUrl = state.thumbUrl,
                     playing = state.playing,
                     positionMs = tick.positionMs,
-                    artworkSize = minOf(268.dp, maxWidth - 96.dp).coerceAtLeast(120.dp),
+                    artworkSize = minOf(268.dp, screenWidth - 96.dp).coerceAtLeast(120.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(292.dp)
