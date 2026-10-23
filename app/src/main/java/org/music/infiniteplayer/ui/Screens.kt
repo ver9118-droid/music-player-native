@@ -4,13 +4,15 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -78,6 +80,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -765,117 +768,117 @@ fun NowPlayingScreen(
     var showRingtone by remember { mutableStateOf(false) }
     val track = state.track
 
-    Column(
+    // 화면을 돌려도 잘리거나 겹치지 않도록 가로/세로 레이아웃을 나눈다.
+    //  - 세로: 위에서 아래로 (내용이 길면 스크롤)
+    //  - 가로: 왼쪽 영상/앨범아트, 오른쪽 정보·컨트롤
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Bg)
-            .padding(horizontal = 20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .background(Bg),
     ) {
-        // 상단 바
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Rounded.KeyboardArrowDown, "접기", tint = TextPrimary)
-            }
-            Text(
-                text = "지금 재생",
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center,
-                color = TextSecondary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            IconButton(onClick = onToggleFavorite) {
-                Icon(
-                    if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    "즐겨찾기",
-                    tint = if (isFavorite) Accent else TextSecondary,
-                )
-            }
-        }
+        val landscape = maxWidth > maxHeight
 
-        // 앨범아트 / 뮤직비디오 영상
-        //  - 모음(플레이리스트) 곡은 영상이 수십 분~수 시간이라 이미지만 보여준다
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (track == null || track.isCompilation) {
-                Artwork(
-                    url = state.thumbUrl,
-                    size = 268.dp,
-                    corner = 24.dp,
-                    maxPx = 720,
+        if (landscape) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                PlayerTopBar(
+                    isFavorite = isFavorite,
+                    onBack = onBack,
+                    onToggleFavorite = onToggleFavorite,
                 )
-            } else {
-                TrackVideo(
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PlayerMedia(
+                        track = track,
+                        thumbUrl = state.thumbUrl,
+                        playing = state.playing,
+                        positionMs = tick.positionMs,
+                        artworkSize = minOf(maxHeight - 120.dp, maxWidth / 2 - 48.dp)
+                            .coerceAtLeast(96.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(end = 14.dp),
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        PlayerDetails(
+                            state = state,
+                            positionMs = tick.positionMs,
+                            durationMs = tick.durationMs,
+                            diag = diag,
+                            onRetry = onRetry,
+                            onDownload = onDownload,
+                            onRingtone = { showRingtone = true },
+                            onRaiseVolume = onRaiseVolume,
+                            onTogglePlay = onTogglePlay,
+                            onNext = onNext,
+                            onPrev = onPrev,
+                            onSeek = onSeek,
+                            onVolume = onVolume,
+                            onShuffle = onShuffle,
+                            onRepeat = onRepeat,
+                        )
+                    }
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                PlayerTopBar(
+                    isFavorite = isFavorite,
+                    onBack = onBack,
+                    onToggleFavorite = onToggleFavorite,
+                )
+                PlayerMedia(
                     track = track,
+                    thumbUrl = state.thumbUrl,
                     playing = state.playing,
                     positionMs = tick.positionMs,
+                    artworkSize = minOf(268.dp, maxWidth - 96.dp).coerceAtLeast(120.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(20.dp)),
-                    fallback = {
-                        Artwork(
-                            url = state.thumbUrl,
-                            size = 268.dp,
-                            corner = 24.dp,
-                            maxPx = 720,
-                        )
-                    },
+                        .height(292.dp)
+                        .padding(vertical = 12.dp),
+                )
+                PlayerDetails(
+                    state = state,
+                    positionMs = tick.positionMs,
+                    durationMs = tick.durationMs,
+                    diag = diag,
+                    onRetry = onRetry,
+                    onDownload = onDownload,
+                    onRingtone = { showRingtone = true },
+                    onRaiseVolume = onRaiseVolume,
+                    onTogglePlay = onTogglePlay,
+                    onNext = onNext,
+                    onPrev = onPrev,
+                    onSeek = onSeek,
+                    onVolume = onVolume,
+                    onShuffle = onShuffle,
+                    onRepeat = onRepeat,
                 )
             }
         }
-
-        // 곡 정보
-        Text(
-            text = state.title.ifBlank { "-" },
-            color = TextPrimary,
-            fontSize = 21.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            text = listOf(state.artist, state.album).filter { it.isNotBlank() }.joinToString(" · ")
-                .ifBlank { " " },
-            color = TextSecondary,
-            fontSize = 13.5.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Spacer(Modifier.height(14.dp))
-
-        // 진행 바
-        SeekBar(
-            positionMs = tick.positionMs,
-            durationMs = tick.durationMs,
-            onSeek = onSeek,
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatTime(tick.positionMs), color = TextSecondary, fontSize = 11.5.sp)
-            Text(formatTime(tick.durationMs), color = TextSecondary, fontSize = 11.5.sp)
-        }
-
-        // 다운로드 / 벨소리
-        ActionChips(
-            state = state,
-            onDownload = onDownload,
-            onRingtone = { showRingtone = true },
-        )
 
         if (showRingtone) {
             RingtoneConfirmDialog(
@@ -886,163 +889,302 @@ fun NowPlayingScreen(
                 },
             )
         }
+    }
+}
 
-        Spacer(Modifier.height(10.dp))
+/** 지금 재생 상단 바 (접기 · 제목 · 즐겨찾기) */
+@Composable
+private fun PlayerTopBar(
+    isFavorite: Boolean,
+    onBack: () -> Unit,
+    onToggleFavorite: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.Rounded.KeyboardArrowDown, "접기", tint = TextPrimary)
+        }
+        Text(
+            text = "지금 재생",
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Center,
+            color = TextSecondary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        IconButton(onClick = onToggleFavorite) {
+            Icon(
+                if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                "즐겨찾기",
+                tint = if (isFavorite) Accent else TextSecondary,
+            )
+        }
+    }
+}
 
-        // 재생 컨트롤
-        EvenRow {
-            RoundIconButton(
-                icon = Icons.Rounded.Shuffle,
-                contentDescription = "셔플",
-                size = 42.dp,
-                iconSize = 19.dp,
-                background = if (state.shuffle) Accent.copy(alpha = 0.22f) else Surface2,
-                tint = if (state.shuffle) Accent else TextSecondary,
-                onClick = { onShuffle(!state.shuffle) },
+/**
+ * 앨범아트 / 뮤직비디오 영상.
+ *
+ *  - 모음(플레이리스트) 곡은 영상이 수십 분~수 시간이라 이미지만 보여준다
+ *  - 가로/세로 어디서든 주어진 영역 안에 맞춘다 (넘쳐서 다른 UI 를 덮지 않게)
+ */
+@Composable
+private fun PlayerMedia(
+    track: Track?,
+    thumbUrl: String,
+    playing: Boolean,
+    positionMs: Long,
+    artworkSize: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (track == null || track.isCompilation) {
+            Artwork(
+                url = thumbUrl,
+                size = artworkSize,
+                corner = 24.dp,
+                maxPx = 720,
             )
-            RoundIconButton(
-                icon = Icons.Rounded.SkipPrevious,
-                contentDescription = "이전 곡",
-                size = 54.dp,
-                iconSize = 30.dp,
-                onClick = onPrev,
-            )
-            RoundIconButton(
-                icon = if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = if (state.playing) "일시정지" else "재생",
-                size = 68.dp,
-                iconSize = 36.dp,
-                background = Accent,
-                tint = Color.White,
-                onClick = onTogglePlay,
-            )
-            RoundIconButton(
-                icon = Icons.Rounded.SkipNext,
-                contentDescription = "다음 곡",
-                size = 54.dp,
-                iconSize = 30.dp,
-                onClick = onNext,
-            )
-            RoundIconButton(
-                icon = if (state.repeat == "one") Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                contentDescription = "반복",
-                size = 42.dp,
-                iconSize = 19.dp,
-                background = if (state.repeat != "off") Accent.copy(alpha = 0.22f) else Surface2,
-                tint = if (state.repeat != "off") Accent else TextSecondary,
-                onClick = {
-                    onRepeat(if (state.repeat == "all") "one" else if (state.repeat == "one") "off" else "all")
+        } else {
+            TrackVideo(
+                track = track,
+                playing = playing,
+                positionMs = positionMs,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(20.dp)),
+                fallback = {
+                    Artwork(
+                        url = thumbUrl,
+                        size = artworkSize,
+                        corner = 24.dp,
+                        maxPx = 720,
+                    )
                 },
             )
         }
+    }
+}
 
-        Spacer(Modifier.height(10.dp))
+/** 곡 정보 · 진행바 · 다운로드/벨소리 · 재생 컨트롤 · 볼륨 · 상태 */
+@Composable
+private fun PlayerDetails(
+    state: PlayerState,
+    positionMs: Long,
+    durationMs: Long,
+    diag: Diagnostics,
+    onRetry: () -> Unit,
+    onDownload: () -> Unit,
+    onRingtone: () -> Unit,
+    onRaiseVolume: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onNext: () -> Unit,
+    onPrev: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onVolume: (Float) -> Unit,
+    onShuffle: (Boolean) -> Unit,
+    onRepeat: (String) -> Unit,
+) {
+    // 곡 정보
+    Text(
+        text = state.title.ifBlank { "-" },
+        color = TextPrimary,
+        fontSize = 21.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(3.dp))
+    Text(
+        text = listOf(state.artist, state.album).filter { it.isNotBlank() }.joinToString(" · ")
+            .ifBlank { " " },
+        color = TextSecondary,
+        fontSize = 13.5.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth(),
+    )
 
-        // 볼륨
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.VolumeDown, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
-            Slider(
-                value = state.volume,
-                onValueChange = onVolume,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 10.dp),
-                colors = SliderDefaults.colors(
-                    thumbColor = Accent,
-                    activeTrackColor = Accent,
-                    inactiveTrackColor = Surface2,
-                ),
-            )
-            Icon(Icons.Rounded.VolumeUp, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
-        }
+    Spacer(Modifier.height(14.dp))
 
-        // 상태 표시
+    // 진행 바
+    SeekBar(
+        positionMs = positionMs,
+        durationMs = durationMs,
+        onSeek = onSeek,
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(formatTime(positionMs), color = TextSecondary, fontSize = 11.5.sp)
+        Text(formatTime(durationMs), color = TextSecondary, fontSize = 11.5.sp)
+    }
+
+    // 다운로드 / 벨소리
+    ActionChips(
+        state = state,
+        onDownload = onDownload,
+        onRingtone = onRingtone,
+    )
+
+    Spacer(Modifier.height(10.dp))
+
+    // 재생 컨트롤
+    EvenRow {
+        RoundIconButton(
+            icon = Icons.Rounded.Shuffle,
+            contentDescription = "셔플",
+            size = 42.dp,
+            iconSize = 19.dp,
+            background = if (state.shuffle) Accent.copy(alpha = 0.22f) else Surface2,
+            tint = if (state.shuffle) Accent else TextSecondary,
+            onClick = { onShuffle(!state.shuffle) },
+        )
+        RoundIconButton(
+            icon = Icons.Rounded.SkipPrevious,
+            contentDescription = "이전 곡",
+            size = 54.dp,
+            iconSize = 30.dp,
+            onClick = onPrev,
+        )
+        RoundIconButton(
+            icon = if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            contentDescription = if (state.playing) "일시정지" else "재생",
+            size = 68.dp,
+            iconSize = 36.dp,
+            background = Accent,
+            tint = Color.White,
+            onClick = onTogglePlay,
+        )
+        RoundIconButton(
+            icon = Icons.Rounded.SkipNext,
+            contentDescription = "다음 곡",
+            size = 54.dp,
+            iconSize = 30.dp,
+            onClick = onNext,
+        )
+        RoundIconButton(
+            icon = if (state.repeat == "one") Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+            contentDescription = "반복",
+            size = 42.dp,
+            iconSize = 19.dp,
+            background = if (state.repeat != "off") Accent.copy(alpha = 0.22f) else Surface2,
+            tint = if (state.repeat != "off") Accent else TextSecondary,
+            onClick = {
+                onRepeat(if (state.repeat == "all") "one" else if (state.repeat == "one") "off" else "all")
+            },
+        )
+    }
+
+    Spacer(Modifier.height(10.dp))
+
+    // 볼륨
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Rounded.VolumeDown, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
+        Slider(
+            value = state.volume,
+            onValueChange = onVolume,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 10.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = Accent,
+                activeTrackColor = Accent,
+                inactiveTrackColor = Surface2,
+            ),
+        )
+        Icon(Icons.Rounded.VolumeUp, "볼륨", tint = TextSecondary, modifier = Modifier.size(18.dp))
+    }
+
+    // 상태 표시
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusChip(
+            text = state.status.ifBlank { "대기" },
+            color = if (state.error.isNotBlank()) Danger else AccentSoft,
+        )
+        if (state.infinite) StatusChip("무한 재생", Accent)
+        if (state.callActive) StatusChip("통화 중", Danger)
+        if (diag.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
+    }
+
+    // 시스템 볼륨이 0 이면 소리가 안 난다 (가장 흔한 원인)
+    if (diag.systemVolume.startsWith("0 ")) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(AccentSoft.copy(alpha = 0.16f))
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            StatusChip(
-                text = state.status.ifBlank { "대기" },
-                color = if (state.error.isNotBlank()) Danger else AccentSoft,
+            Text(
+                "시스템 미디어 볼륨이 0 입니다 (소리가 나지 않는 원인)",
+                color = AccentSoft,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
             )
-            if (state.infinite) StatusChip("무한 재생", Accent)
-            if (state.callActive) StatusChip("통화 중", Danger)
-            if (diag.systemVolume.startsWith("0 ")) StatusChip("시스템 볼륨 0", Danger)
-        }
-
-        // 시스템 볼륨이 0 이면 소리가 안 난다 (가장 흔한 원인)
-        if (diag.systemVolume.startsWith("0 ")) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(AccentSoft.copy(alpha = 0.16f))
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "시스템 미디어 볼륨이 0 입니다 (소리가 나지 않는 원인)",
-                    color = AccentSoft,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AccentSoft)
-                        .clickable(onClick = onRaiseVolume)
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                ) {
-                    Text("볼륨 올리기", color = Color(0xFF04231C), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-            Spacer(Modifier.height(10.dp))
-        }
-
-        // 오류 안내 + 복구 버튼
-        if (state.error.isNotBlank()) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Danger.copy(alpha = 0.13f))
-                    .padding(12.dp),
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AccentSoft)
+                    .clickable(onClick = onRaiseVolume)
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
             ) {
-                Column {
-                    Text(state.error, color = Danger, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Accent)
-                                .clickable(onClick = onRetry)
-                                .padding(horizontal = 14.dp, vertical = 7.dp),
-                        ) {
-                            Text("다시 시도", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Surface2)
-                                .clickable(onClick = onDownload)
-                                .padding(horizontal = 14.dp, vertical = 7.dp),
-                        ) {
-                            Text(
-                                text = if (state.downloadProgress >= 0)
-                                    "내려받는 중 ${state.downloadProgress}%" else "파일로 받기",
-                                color = TextSecondary,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
-                        }
+                Text("볼륨 올리기", color = Color(0xFF04231C), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+
+    // 오류 안내 + 복구 버튼
+    if (state.error.isNotBlank()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Danger.copy(alpha = 0.13f))
+                .padding(12.dp),
+        ) {
+            Column {
+                Text(state.error, color = Danger, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Accent)
+                            .clickable(onClick = onRetry)
+                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                    ) {
+                        Text("다시 시도", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Surface2)
+                            .clickable(onClick = onDownload)
+                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                    ) {
+                        Text(
+                            text = if (state.downloadProgress >= 0)
+                                "내려받는 중 ${state.downloadProgress}%" else "파일로 받기",
+                            color = TextSecondary,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
             }
-            Spacer(Modifier.height(10.dp))
         }
+        Spacer(Modifier.height(10.dp))
     }
 }
 
