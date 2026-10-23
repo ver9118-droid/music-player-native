@@ -2,9 +2,10 @@ package org.music.infiniteplayer.ui
 
 import android.view.ViewGroup
 import androidx.annotation.OptIn
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -15,7 +16,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -141,14 +141,17 @@ fun TrackVideo(
     }
 
     if (url == null || player == null) {
-        if (failed) {
+        // 영상을 찾는 동안에도 앨범아트를 보여준다 (검은 화면 방지)
+        Box(modifier = modifier) {
             fallback()
-        } else {
-            Box(
-                modifier = modifier.background(Color.Black),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
+            if (!failed) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.padding(8.dp).size(18.dp),
+                        color = Accent,
+                        strokeWidth = 2.dp,
+                    )
+                }
             }
         }
         return
