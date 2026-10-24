@@ -169,7 +169,7 @@ fun TrackVideo(
             .setMediaSourceFactory(factory)
             .setLoadControl(loadControl)
             // 영상은 키프레임 단위로만 이동할 수 있어서, 먼 위치로 튀지 않게 가까운 지점으로 맞춘다
-            .setSeekParameters(SeekParameters.CLOSEST)
+            .setSeekParameters(SeekParameters.CLOSEST_SYNC)
             .build()
             .apply {
                 setMediaItem(MediaItem.fromUri(streamUrl))
@@ -221,7 +221,7 @@ fun TrackVideo(
         val p = player ?: return@LaunchedEffect
         while (true) {
             delay(1_000)
-            if (p.playbackState == Player.STATE_READY && p.isPlaying && !p.isBuffering) {
+            if (p.playbackState == Player.STATE_READY && p.isPlaying) {
                 val target = latestPosition
                 if (target > 1_500L && abs(p.currentPosition - target) > 1_500L) {
                     runCatching { p.seekTo(target) }
