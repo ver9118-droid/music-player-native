@@ -56,7 +56,6 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -783,7 +782,6 @@ fun NowPlayingScreen(
     onToggleFavorite: () -> Unit,
     onRetry: () -> Unit,
     onDownload: () -> Unit,
-    onRingtone: () -> Unit,
     onRaiseVolume: () -> Unit,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
@@ -797,7 +795,6 @@ fun NowPlayingScreen(
     // 재생 위치는 이 화면에서만 구독 (홈 화면 재렌더링 방지)
     val tick by org.music.infiniteplayer.playback.PlayerBus.tick
         .collectAsStateWithLifecycle()
-    var showRingtone by remember { mutableStateOf(false) }
     val track = state.track
 
     val context = LocalContext.current
@@ -927,7 +924,7 @@ fun NowPlayingScreen(
 
                         Spacer(Modifier.weight(1f))
 
-                        // 하단: 곡 정보 · 진행바 · 다운로드/벨소리 · 재생 버튼
+                        // 하단: 곡 정보 · 진행바 · 다운로드 · 재생 버튼
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -950,7 +947,6 @@ fun NowPlayingScreen(
                                 compact = true,
                                 onRetry = onRetry,
                                 onDownload = onDownload,
-                                onRingtone = { showRingtone = true },
                                 onRaiseVolume = onRaiseVolume,
                                 onTogglePlay = onTogglePlay,
                                 onNext = onNext,
@@ -998,7 +994,6 @@ fun NowPlayingScreen(
                     diag = diag,
                     onRetry = onRetry,
                     onDownload = onDownload,
-                    onRingtone = { showRingtone = true },
                     onRaiseVolume = onRaiseVolume,
                     onTogglePlay = onTogglePlay,
                     onNext = onNext,
@@ -1008,16 +1003,6 @@ fun NowPlayingScreen(
                     onRepeat = onRepeat,
                 )
             }
-        }
-
-        if (showRingtone) {
-            RingtoneConfirmDialog(
-                onDismiss = { showRingtone = false },
-                onConfirm = {
-                    showRingtone = false
-                    onRingtone()
-                },
-            )
         }
     }
 }
@@ -1135,7 +1120,7 @@ private fun PlayerMedia(
 }
 
 /**
- * 곡 정보 · 진행바 · 다운로드/벨소리 · 재생 컨트롤 · 볼륨 · 상태
+ * 곡 정보 · 진행바 · 다운로드 · 재생 컨트롤 · 볼륨 · 상태
  *
  * @param compact 가로 전체 화면 오버레이용 (영상을 가리지 않도록 볼륨/상태 칩 생략)
  */
@@ -1148,7 +1133,6 @@ private fun PlayerDetails(
     compact: Boolean = false,
     onRetry: () -> Unit,
     onDownload: () -> Unit,
-    onRingtone: () -> Unit,
     onRaiseVolume: () -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
@@ -1191,11 +1175,10 @@ private fun PlayerDetails(
         Text(formatTime(durationMs), color = TextSecondary, fontSize = 11.5.sp)
     }
 
-    // 다운로드 / 벨소리
+    // 다운로드
     ActionChips(
         state = state,
         onDownload = onDownload,
-        onRingtone = onRingtone,
     )
 
     Spacer(Modifier.height(if (compact) 6.dp else 10.dp))
@@ -1528,12 +1511,11 @@ private fun ActionButton(text: String, bg: Color, fg: Color, onClick: () -> Unit
     }
 }
 
-/** 다운로드 / 벨소리 칩 */
+/** 다운로드 칩 */
 @Composable
 private fun ActionChips(
     state: PlayerState,
     onDownload: () -> Unit,
-    onRingtone: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -1547,57 +1529,7 @@ private fun ActionChips(
             selected = false,
             icon = Icons.Rounded.Download,
         ) { onDownload() }
-        SmallChip(
-            text = "벨소리",
-            selected = false,
-            icon = Icons.Rounded.Notifications,
-        ) { onRingtone() }
     }
-}
-
-/**
- * 벨소리 설정 확인 창.
- *
- * 초/길이를 고르게 하지 않는다. 곡마다 다른 하이라이트 구간은
- * [org.music.infiniteplayer.core.HighlightFinder] 가 자동으로 찾는다.
- */
-@Composable
-private fun RingtoneConfirmDialog(
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("벨소리로 설정", color = TextPrimary, fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                Text(
-                    "이 곡의 하이라이트(후렴) 구간을 자동으로 찾아 30초로 잘라 벨소리로 설정합니다.",
-                    color = TextSecondary,
-                    fontSize = 12.5.sp,
-                    lineHeight = 18.sp,
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "저장 위치: 음악/Ringtones · 기기 설정에서 벨소리로 선택하세요",
-                    color = TextSecondary,
-                    fontSize = 11.5.sp,
-                    lineHeight = 16.sp,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text("자동으로 설정", color = Accent, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("취소", color = TextSecondary)
-            }
-        },
-        containerColor = Surface1,
-    )
 }
 
 @Composable

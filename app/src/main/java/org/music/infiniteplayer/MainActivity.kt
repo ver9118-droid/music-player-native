@@ -111,7 +111,7 @@ class MainActivity : ComponentActivity() {
             //  의심할 수 있어 요청하지 않는다)
         }
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-            // Android 9 이하 : 음악 라이브러리/벨소리 저장용
+            // Android 9 이하 : 음악 라이브러리 저장용
             wanted.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
         if (wanted.isNotEmpty()) {

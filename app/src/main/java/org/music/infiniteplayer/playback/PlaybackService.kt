@@ -1290,7 +1290,7 @@ class PlaybackService : MediaSessionService() {
 
     // ── 구간 반복 (삭제됨) ─────────────────────────────────────
 
-    /** 파일로 저장할 때 쓰는 오디오 (AAC/m4a 로 통일 → 벨소리·음악라이브러리 호환) */
+    /** 파일로 저장할 때 쓰는 오디오 (AAC/m4a 로 통일 → 음악라이브러리 호환) */
     private suspend fun resolveForFile(entry: Entry): ResolvedAudio? {
         val current = entry.audio
         if (current != null && current.mimeType.contains("mp4")) return current
@@ -1359,127 +1359,6 @@ class PlaybackService : MediaSessionService() {
             errorText = ""
             setManualStatus("다운로드 완료")
             toast("다운로드 완료 · $name")
-            publish()
-        }
-    }
-
-    /**
-     * 벨소리로 설정.
-     *
-     * 곡마다 후렴 위치가 다르므로 사용자가 초를 고르게 하지 않는다.
-     * 음원을 실제로 분석해 **소리가 가장 큰 30초 구간**을 자동으로 잘라 벨소리로 쓴다.
-     * (분석 실패 시 곡 길이의 35% 지점, 그것도 안 되면 곡 전체)
-     */
-    fun setAsRingtone() {
-        val entry = currentEntry
-        if (entry == null) {
-            toast("재생 중인 곡이 없습니다")
-            return
-        }
-        scope.launch {
-            val audio = resolveForFile(entry)
-            if (audio == null) {
-                errorText = "스트림을 얻지 못했습니다"
-                clearManualStatus()
-                toast("벨소리 실패: 스트림을 얻지 못했습니다")
-                publish()
-                return@launch
-            }
-            val src = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
-            var useAudio = audio
-            if (!src.exists() || src.length() < 1024) {
-                downloadProgress = 0
-                setManualStatus("음원 준비 중...")
-                var audio2 = resolveForFile(entry)
-                if (audio2 == null) {
-                    errorText = "스트림 주소를 얻지 못했습니다"
-                    clearManualStatus()
-                    toast("벨소리 실패: 스트림 주소를 얻지 못했습니다")
-                    publish()
-                    return@launch
-                }
-                var res = org.music.infiniteplayer.core.Downloader.download(audio2.url, src) { percent ->
-                    downloadProgress = percent
-                    publish()
-                }
-                if (!res.ok) {
-                    entry.audio = null
-                    entry.job = null
-                    audio2 = resolveEntry(entry, prefer = listOf(140, 139), useCache = false)
-                    if (audio2 != null) {
-                        res = org.music.infiniteplayer.core.Downloader.download(audio2.url, src) { percent ->
-                            downloadProgress = percent
-                            publish()
-                        }
-                    }
-                }
-                downloadProgress = -1
-                if (!res.ok || audio2 == null) {
-                    errorText = "다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
-                    clearManualStatus()
-                    toast("벨소리 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
-                    publish()
-                    return@launch
-                }
-                useAudio = audio2
-            }
-            val fileName = safeFileName(entry.track, useAudio.mimeType)
-            var ringFile = src
-            var highlight = false
-            setManualStatus("하이라이트 구간 찾는 중...")
-            publish()
-            val found = withContext(Dispatchers.IO) {
-                org.music.infiniteplayer.core.HighlightFinder.find(src)
-            }
-            val startMs = found.startMs
-            val lengthMs = found.lengthMs
-            // 곡 전체가 벨소리 길이면 자를 필요가 없다
-            if (lengthMs > 0 && lengthMs < found.durationMs - 1_000L) {
-                setManualStatus("벨소리 구간 준비 중...")
-                publish()
-                val trimmed = File(cacheDir, "ring_${entry.track.id.hashCode()}_${startMs}_$lengthMs.m4a")
-                highlight = withContext(Dispatchers.IO) {
-                    org.music.infiniteplayer.core.AudioTrimmer.trim(src, trimmed, startMs, lengthMs)
-                }
-                if (highlight) ringFile = trimmed
-            }
-            val name = if (highlight) {
-                fileName.substringBeforeLast('.') + " (하이라이트)." + fileName.substringAfterLast('.')
-            } else {
-                fileName
-            }
-            val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
-                this@PlaybackService, ringFile, name, useAudio.mimeType,
-            )
-            if (saved.uri == null) {
-                errorText = "벨소리 저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
-                clearManualStatus()
-                toast("벨소리 저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
-                publish()
-                return@launch
-            }
-            val ok = withContext(Dispatchers.IO) {
-                org.music.infiniteplayer.core.RingtoneSetter.setRingtone(this@PlaybackService, saved.uri)
-            }
-            errorText = ""
-            val startLabel = if (highlight) {
-                val total = (startMs / 1000L)
-                val mm = total / 60
-                val ss = total % 60
-                " · ${if (mm > 0) "${mm}분 " else ""}${ss}초부터"
-            } else {
-                ""
-            }
-            setManualStatus(
-                if (ok) "벨소리로 설정했습니다$startLabel" else "벨소리로 저장했습니다 (설정에서 선택)$startLabel",
-            )
-            toast(
-                if (ok) {
-                    "벨소리로 설정했습니다$startLabel"
-                } else {
-                    "벨소리 파일을 저장했습니다. 설정 → 소리 → 벨소리에서 선택하세요$startLabel"
-                },
-            )
             publish()
         }
     }
