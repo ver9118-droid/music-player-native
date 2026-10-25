@@ -1499,7 +1499,7 @@ class PlaybackService : MediaSessionService() {
         var target: Intent? = null
         for (cand in candidates) {
             val resolvable = try {
-                cand.resolve(packageManager) != null
+                cand.resolveActivity(packageManager) != null
             } catch (_: Exception) {
                 false
             }
