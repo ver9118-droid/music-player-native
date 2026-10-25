@@ -885,7 +885,7 @@ fun NowPlayingScreen(
                     artworkSize = minOf(screenWidth, screenHeight),
                     modifier = Modifier.fillMaxSize(),
                     rounded = false,
-                    zoom = true,
+                    // 가로도 세로와 같은 방식으로 맞춘다 (영상 잘림 없음 · 전체가 다 보인다)
                 )
 
                 // 영상 위를 탭하면 컨트롤 표시/숨김 (PlayerView 가 터치를 먹지 않도록 위에 둔다)
@@ -1080,7 +1080,6 @@ private fun PlayerMedia(
     artworkSize: Dp,
     modifier: Modifier = Modifier,
     rounded: Boolean = true,
-    zoom: Boolean = false,
     fillBox: Boolean = false,
 ) {
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -1104,7 +1103,6 @@ private fun PlayerMedia(
                 track = track,
                 playing = playing,
                 positionMs = positionMs,
-                zoom = zoom,
                 modifier = Modifier
                     .fillMaxSize()
                     .then(
