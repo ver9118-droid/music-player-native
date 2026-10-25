@@ -1467,7 +1467,7 @@ class PlaybackService : MediaSessionService() {
             } else {
                 setManualStatus("벨소리 저장 완료 (권한 필요)")
                 toast("벨소리 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")
-                org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this)
+                org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this@PlaybackService)
             }
             publish()
         }

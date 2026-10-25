@@ -256,7 +256,7 @@ object AudioTrimmer {
                 if (buf != null && info.size > 0) {
                     buf.position(info.offset)
                     buf.limit(info.offset + info.size)
-                    if (out.size + info.size > maxBytes) {
+                    if (out.size() + info.size > maxBytes) {
                         dec.releaseOutputBuffer(outIndex, false)
                         break
                     }
@@ -277,7 +277,7 @@ object AudioTrimmer {
                 if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
             }
 
-            if (out.size == 0) return null
+            if (out.size() == 0) return null
             return Pcm(out.toByteArray(), sampleRate, channels)
         } catch (_: Exception) {
             return null
@@ -328,7 +328,7 @@ object AudioTrimmer {
             if (gain >= 0.999) continue
             for (ch in 0 until pcm.channels) {
                 val idx = (f * pcm.channels + ch) * 2
-                val raw = (bytes[idx + 1] shl 8) or (bytes[idx].toInt() and 0xFF)
+                val raw = (bytes[idx + 1].toInt() shl 8) or (bytes[idx].toInt() and 0xFF)
                 val v = (raw * gain).toInt().coerceIn(-32768, 32767)
                 bytes[idx] = (v and 0xFF).toByte()
                 bytes[idx + 1] = ((v shr 8) and 0xFF).toByte()
@@ -341,7 +341,7 @@ object AudioTrimmer {
         val frameBytes = 2 * pcm.channels
         var codec: MediaCodec? = null
         var muxer: MediaMuxer? = null
-        try {
+        return try {
             val format = MediaFormat.createAudioFormat("audio/mp4a-latm", pcm.sampleRate, pcm.channels)
             format.setInteger(MediaFormat.KEY_BIT_RATE, ENCODE_BITRATE)
             format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
@@ -414,7 +414,7 @@ object AudioTrimmer {
                 val buf = enc.getOutputBuffer(outIndex)
                 if (buf != null && info.size > 0 && track >= 0) {
                     // 설정(헤더) 버퍼는 파일에 쓰지 않는다
-                    if (info.flags and MediaCodec.BUFFER_FLAG_CONFIG_EXTENSION == 0) {
+                    if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                         if (baseUs < 0) baseUs = info.presentationTimeUs
                         buf.position(info.offset)
                         buf.limit(info.offset + info.size)
