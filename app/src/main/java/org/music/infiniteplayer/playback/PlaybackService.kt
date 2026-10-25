@@ -1488,8 +1488,8 @@ class PlaybackService : MediaSessionService() {
             if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
         }
 
-        val target = candidates.firstOrNull {
-            runCatching { it.resolve(packageManager) }.getOrNull() != null
+        val target = candidates.firstOrNull { cand ->
+            runCatching { cand.resolve(packageManager) }.getOrNull() != null
         } ?: return
         val started = runCatching {
             target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
