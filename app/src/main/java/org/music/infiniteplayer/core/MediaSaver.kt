@@ -27,19 +27,24 @@ object MediaSaver {
     /**
      * 벨소리 파일이 놓이는 폴더.
      *
-     * 사운드 선택기 ＋ 목록은 **Music 폴더** 만 읽는다.
-     * 설정 > 소리 및 진동 > 벨소리 목록은 폴더가 아니라 `IS_RINGTONE=1` 인 행을 읽는다.
-     * 그래서 Music 폴더에 `IS_RINGTONE=1` + `IS_MUSIC=1` 로 넣으면 **두 목록 모두** 보인다.
+     * 설정 > 소리 및 진동 > 벨소리 목록은 **Ringtones 폴더에 physically 있는 파일** 만 보여 준다
+     * (`RingtoneManager.isCustomRingtone` 는 Ringtones / Notifications / Alarms 폴더 파일만 인정한다).
+     * Music 폴더에 `IS_RINGTONE=1` 로 넣으면 사운드 선택기 ＋ 목록에는 보이지만
+     * 설정 벨소리 목록에는 보이지 않는다 — 사운드 선택기에서 완료하면 파일이 Ringtones 폴더로
+     * 복사된 뒤에야 설정 목록에 나타난다.
+     *
+     * 그래서 이 앱은 파일을 **Ringtones 폴더에 직접** 넣는다. 플래그는 둘 다 켠다:
+     * `IS_RINGTONE=1` (설정 벨소리 목록) + `IS_MUSIC=1` (음악 라이브러리 · 사운드 선택기 ＋ 목록).
      */
-    private const val RING_DIR = "Music"
+    private const val RING_DIR = "Ringtones"
 
     /**
-     * 이전 버전이 벨소리를 넣어 둔 폴더.
+     * 이전 버전이 벨소리를 넣어 둔 폴더 (Music).
      *
-     * 이미 있는 파일은 **새로 만들지 않는다** — 그 행을 재사용해 옮긴다
+     * 이미 있는 파일은 **새로 만들지 않는다** — 그 행을 재사용해 Ringtones 로 옮긴다
      * (MediaStore ID 가 유지되고, 목록에 같은 곡이 두 개로 보이지 않는다).
      */
-    private const val RING_ROOT_DIR = "Ringtones"
+    private const val RING_LEGACY_DIR = "Music"
 
     /**
      * MIME 타입 정리.
@@ -93,12 +98,14 @@ object MediaSaver {
     }
 
     /**
-     * 벨소리로 저장 — **Music 폴더에 한 개** (`IS_RINGTONE=1` + `IS_MUSIC=1`).
+     * 벨소리로 저장 — **Ringtones 폴더에 한 개** (`IS_RINGTONE=1` + `IS_MUSIC=1`).
      *
      * 순서:
      *  ① 앱이 만든 같은 이름 행이 이미 있으면 → `keepSingleCopy` 로 **한 개만** 남긴다
      *     (새 파일을 만들지 않고 기존 MediaStore 행을 재사용 → ID 유지 → 목록에 두 개로 안 보임)
      *  ② 그 행에 **하이라이트로 잘린 음원을 덮어쓴다** (파일을 새로 만들지 않는다)
+     *     + 폴더/플래그를 Ringtones · `IS_RINGTONE=1` · `IS_MUSIC=1` 로 정리한다
+     *     (설정 벨소리 목록은 Ringtones 폴더 파일만 보여 준다)
      *  ③ 아무것도 없으면 새로 삽입
      *
      * 사용자가 직접 넣어 둔 파일은 옮기거나 지우지 않는다 (앱이 만든 이름만 처리).
@@ -121,7 +128,10 @@ object MediaSaver {
                     return@withContext SaveResult(kept, "")
                 }
             } else {
-                findExisting(resolver, name, RING_DIR)?.let { return@withContext SaveResult(it, "") }
+                // 사용자 파일: 그 자리 그대로 사용한다 (옮기거나 지우지 않는다)
+                val userRow = findExisting(resolver, name, RING_DIR)
+                    ?: findExisting(resolver, name, RING_LEGACY_DIR)
+                if (userRow != null) return@withContext SaveResult(userRow, "")
             }
 
             insert(context, file, name, mime, RING_DIR, isRingtone = true)
@@ -134,7 +144,8 @@ object MediaSaver {
      * 같은 이름 사본이 두 곳에 있으면 **한 개만** 남긴다 (이전 버전이 두 곳에 저장해 둔 파일 정리).
      *
      *  - **현재 벨소리로 걸려 있는 쪽** 의 행을 유지한다 — 그 행이 목록에서 보이는 쪽이다.
-     *  - 유지하는 행은 Music 폴더로 **옮긴다** (파일을 복사하지 않는다 → ID 유지).
+     *  - 유지하는 행은 Ringtones 폴더로 **옮긴다** (파일을 복사하지 않는다 → ID 유지).
+     *    설정 > 소리 및 진동 > 벨소리 목록은 Ringtones 폴더 파일만 보여 주기 때문이다.
      *  - 다른 사본은 **앱이 만든 행일 때만** 지운다. 사용자가 직접 넣어 둔 파일은 삭제하지 않는다.
      *
      * 같은 이름 파일이 하나도 없으면 null (그때는 새로 삽입하면 된다).
@@ -142,9 +153,9 @@ object MediaSaver {
     fun keepSingleCopy(context: Context, displayName: String): Uri? {
         val resolver = context.contentResolver
         val name = safeName(displayName)
-        val root = findExisting(resolver, name, RING_ROOT_DIR)
-        val music = findExisting(resolver, name, RING_DIR)
-        if (root == null && music == null) return null
+        val ringtone = findExisting(resolver, name, RING_DIR)
+        val legacy = findExisting(resolver, name, RING_LEGACY_DIR)
+        if (ringtone == null && legacy == null) return null
 
         val current = try {
             RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE)
@@ -153,8 +164,8 @@ object MediaSaver {
         }
 
         // 현재 벨소리로 걸려 있는 쪽의 ID 를 유지한다 (그 행이 목록에서 보이는 쪽이다)
-        val keep = (if (current != null && current == music) music else (root ?: music)) ?: return null
-        val drop = if (keep == music) root else music
+        val keep = (if (current != null && current == legacy) legacy else (ringtone ?: legacy)) ?: return null
+        val drop = if (keep == legacy) ringtone else legacy
 
         if (drop != null && isAppCreated(name) && ownedByApp(resolver, drop, context.packageName)) {
             try {
@@ -165,13 +176,15 @@ object MediaSaver {
         }
 
         // 앱이 만든 파일만 폴더를 옮긴다 (사용자가 넣은 파일은 그 자리 그대로 둔다)
-        return if (isAppCreated(name)) moveToMusicFolder(resolver, keep) ?: keep else keep
+        return if (isAppCreated(name)) moveToRingtoneFolder(resolver, keep) ?: keep else keep
     }
 
     /**
      * MediaStore **행에 파일 내용을 덮어쓴다** (행 ID 는 그대로 유지된다).
      *
      * 앱이 만든 행만 쓸 수 있다. 쓸 수 없으면 false — 그때는 기존 파일 그대로 사용한다.
+     * 덮어쓰기 전에 행을 **Ringtones 폴더 + `IS_RINGTONE=1` + `IS_MUSIC=1`** 로 정리한다
+     * (재사용한 행이 예전 Music 폴더에 있거나 플래그가 꺼져 있으면 설정 벨소리 목록에 보이지 않는다).
      * 덮어쓴 뒤에는 크기·길이 메타데이터가 다시 계산되도록 스캔한다.
      */
     private fun overwrite(
@@ -181,8 +194,11 @@ object MediaSaver {
         file: File,
         mimeType: String,
     ): Boolean {
+        // 설정 벨소리 목록에 보이게: Ringtones 폴더 + 플래그 (ID 는 유지된다)
+        val moved = moveToRingtoneFolder(resolver, uri) ?: uri
+
         val wrote = try {
-            resolver.openOutputStream(uri)?.use { out ->
+            resolver.openOutputStream(moved)?.use { out ->
                 file.inputStream().use { input -> input.copyTo(out) }
                 true
             } ?: false
@@ -192,7 +208,7 @@ object MediaSaver {
         if (!wrote) return false
 
         try {
-            val path = resolver.query(uri, arrayOf(MediaStore.Audio.Media.DATA), null, null, null)?.use { c ->
+            val path = resolver.query(moved, arrayOf(MediaStore.Audio.Media.DATA), null, null, null)?.use { c ->
                 val index = c.getColumnIndex(MediaStore.Audio.Media.DATA)
                 if (index >= 0 && c.moveToFirst()) c.getString(index) else null
             }
@@ -311,19 +327,19 @@ object MediaSaver {
     }
 
     /**
-     * MediaStore **행만** Music 폴더로 옮긴다 (파일을 복사하지 않는다).
+     * MediaStore **행만** Ringtones 폴더로 옮긴다 (파일을 복사하지 않는다).
      *
      * 행 ID 가 유지되므로 목록에서 같은 곡이 두 개로 보이지 않는다.
-     * 벨소리 + 음악 flags: 설정 벨소리 목록과 사운드 선택기 ＋ 목록 양쪽에서 보이게.
+     * 설정 > 소리 및 진동 > 벨소리 목록은 Ringtones 폴더 파일만 보여 준다.
+     * 플래그: `IS_RINGTONE=1` (설정 벨소리 목록) + `IS_MUSIC=1` (음악 라이브러리 · 사운드 선택기 ＋ 목록).
      */
-    private fun moveToMusicFolder(
+    private fun moveToRingtoneFolder(
         resolver: android.content.ContentResolver,
         uri: Uri,
     ): Uri? {
         return try {
             val values = ContentValues().apply {
                 put(MediaStore.Audio.Media.RELATIVE_PATH, RING_DIR)
-                // 벨소리 + 음악 flags: 설정 벨소리 목록과 사운드 선택기 ＋ 목록 양쪽에서 보이게
                 put(MediaStore.Audio.Media.IS_RINGTONE, 1)
                 put(MediaStore.Audio.Media.IS_MUSIC, 1)
             }
