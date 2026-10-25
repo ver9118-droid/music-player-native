@@ -1508,9 +1508,14 @@ class PlaybackService : MediaSessionService() {
                     " · 하이라이트 ${window.label()}$f"
                 } else if (fadeFail.isNotBlank()) {
                     // 하이라이트는 찾았지만 페이드 인코딩이 실패했다 → 이유를 표시한다
+                    // (토스트는 두 줄에서 잘리므로 파일명을 빼서 이유가 보이게 한다)
                     " · 곡 전체 (페이드 실패: $fadeFail)"
                 } else " · 곡 전체"
-                toast("벨소리 적용 완료 · $name$where")
+                if (window == null && fadeFail.isNotBlank()) {
+                    toast("벨소리 적용 완료 ·$where")
+                } else {
+                    toast("벨소리 적용 완료 · $name$where")
+                }
             } else {
                 setManualStatus("벨소리 저장 완료 (권한 필요)")
                 toast("벨소리 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")

@@ -193,6 +193,7 @@ object Highlight {
             var written = 0
             var guard = 0
             var frameBytes = 2
+            var pcmBuf: ByteBuffer? = null
 
             while (guard++ < 200_000) {
                 // 1) 디코더 입력 — 구간 안의 샘플만 넣는다
@@ -230,15 +231,31 @@ object Highlight {
                                     MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
                                 )
                             }
-                            applyGain(pcm, info, startUs, endUs, inSec, outSec)
+                            // **중요**: decoder.getOutputBuffer() 가 돌려주는 버퍼는 **읽기 전용**이다
+                            // (MediaCodec 문서: "Returns a read-only ByteBuffer"). 여기에 게인을 직접
+                            // 쓰면 ReadOnlyBufferException (메시지 없음) 으로 실패한다.
+                            // → 우리가 만든 쓰기 가능한 버퍼로 복사한 뒤 그 버퍼에 게인을 입힌다.
+                            var w = pcmBuf
+                            if (w == null || w.capacity() < info.size) {
+                                w = ByteBuffer.allocate(max(info.size, 1 shl 16))
+                                pcmBuf = w
+                            }
+                            val work = w
+                            work.clear()
+                            val src = pcm.duplicate()
+                            src.position(info.offset)
+                            src.limit(info.offset + info.size)
+                            work.put(src)
+                            work.limit(info.size)
 
-                            // 버퍼의 limit 은 캐패시티까지 있다 — info.size 만큼만 잘라야 한다.
-                            // 그대로 put 하면 디코더 출력 버퍼가 인코더 입력 버퍼보다 클 때
-                            // BufferOverflowException (또는 queueInputBuffer 의 size 오류) 으로 실패한다.
-                            pcm.position(info.offset)
-                            pcm.limit(info.offset + info.size)
+                            val gainInfo = MediaCodec.BufferInfo()
+                            gainInfo.offset = 0
+                            gainInfo.size = info.size
+                            gainInfo.presentationTimeUs = info.presentationTimeUs
+                            applyGain(work, gainInfo, startUs, endUs, inSec, outSec)
 
                             // 인코더 시간 기준은 파일 시작(0) 이다
+                            work.position(0)
                             val basePts = info.presentationTimeUs - startUs
                             var left = info.size
                             while (left > 0) {
@@ -248,10 +265,10 @@ object Highlight {
                                 encBuffer.clear()
                                 val chunk = min(left, encBuffer.remaining())
                                 if (chunk <= 0) break
-                                val limit = pcm.limit()
-                                pcm.limit(pcm.position() + chunk)
-                                encBuffer.put(pcm)
-                                pcm.limit(limit)
+                                // 인코더 입력 버퍼 캐패시티가 작을 수 있으므로 chunk 로 나눠 넣는다
+                                work.limit(work.position() + chunk)
+                                encBuffer.put(work)
+                                work.limit(info.size)
                                 val pts = basePts + (info.size - left) * 1_000_000L / frameBytes
                                 encoder.queueInputBuffer(encIn, 0, chunk, pts, 0)
                                 left -= chunk
@@ -323,6 +340,8 @@ object Highlight {
             if (outTrack >= 0 && muxer != null) muxer.stop()
             return if (written > 0 && out.length() > 0) null else "인코딩 출력 없음"
         } catch (e: Exception) {
+            // 앱 안에서도 원인을 볼 수 있게 남긴다 (토스트는 길면 잘린다)
+            android.util.Log.w("Highlight", "페이드 인코딩 실패", e)
             return e.message ?: e.javaClass.simpleName
         } finally {
             try {

@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `app-release-v3.5.26.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> `app-release-v3.5.27.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -53,6 +53,18 @@
 - **한국대중음악 장르 8종** (유튜브 검색)
 - 재생은 유튜브 InnerTube API 로 직접 스트림 URL 을 받아 ExoPlayer 가 재생
   (별도 다운로드/변환 불필요 → 준비 시간 1~2초)
+
+## v3.5.27 변경 내용
+- **페이드 실패의 진짜 원인 수정** — `ReadOnlyBufferException`
+  - `MediaCodec.getOutputBuffer()` 가 돌려주는 디코더 출력 버퍼는 **읽기 전용**이다
+    (문서: "Returns a read-only ByteBuffer"). 거기에 게인 램프를 직접 쓰던 `applyGain` 이
+    매번 `ReadOnlyBufferException` 으로 죽었다. 이 예외는 메시지가 없어 토스트에는
+    클래스 이름 앞부분(`Rea…`)만 보였다.
+  - 이제 PCM 을 **우리가 만든 쓰기 가능한 버퍼로 복사**한 뒤 그 버퍼에서 게인을 계산한다
+    (디코더 버퍼는 읽기만 한다). 인코더 입력은 그 버퍼에서 chunk 단위로 넣는다.
+  - 실패 시 Logcat 에 스택 트레이스를 남긴다 (`Highlight` 태그).
+- 페이드 실패 토스트에서 파일명을 빼서 실패 이유가 잘리지 않게 했다
+- versionName 3.5.27 / versionCode 88
 
 ## v3.5.26 변경 내용
 - **벨소리 페이드 실패 버그 수정** — 페이드 인코딩이 실패하면 하이라이트를 찾았어도 곡 전체가 저장됐다.
