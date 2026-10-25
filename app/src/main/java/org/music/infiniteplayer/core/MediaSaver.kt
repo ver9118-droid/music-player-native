@@ -14,7 +14,7 @@ import java.io.File
 import kotlin.coroutines.resume
 
 /**
- * 기기 저장소(음악 라이브러리) 에 파일 저장.
+ * 기기 저장소(음악 라이브러리 / 벨소리) 에 파일 저장.
  *
  *  - Android 10(API 29) 이상 : MediaStore 에 직접 삽입 (권한 불필요)
  *  - 그 이하 : 공개 폴더에 복사 후 미디어 스캐너 등록
@@ -22,6 +22,7 @@ import kotlin.coroutines.resume
 object MediaSaver {
 
     private const val MUSIC_DIR = "Music/무한 음악 플레이어"
+    private const val RING_DIR = "Music/Ringtones"
 
     /**
      * MIME 타입 정리.
@@ -68,9 +69,25 @@ object MediaSaver {
         val mime = plainMime(mimeType)
         val name = safeName(displayName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            insert(context, file, name, mime, MUSIC_DIR)
+            insert(context, file, name, mime, MUSIC_DIR, isRingtone = false)
         } else {
             copyLegacy(context, file, name, mime, Environment.DIRECTORY_MUSIC)
+        }
+    }
+
+    /** 벨소리 목록에 보이게 저장 (IS_RINGTONE 플래그) */
+    suspend fun saveAsRingtone(
+        context: Context,
+        file: File,
+        displayName: String,
+        mimeType: String,
+    ): SaveResult = withContext(Dispatchers.IO) {
+        val mime = plainMime(mimeType)
+        val name = safeName(displayName)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            insert(context, file, name, mime, RING_DIR, isRingtone = true)
+        } else {
+            copyLegacy(context, file, name, mime, Environment.DIRECTORY_RINGTONES)
         }
     }
 
@@ -80,6 +97,7 @@ object MediaSaver {
         displayName: String,
         mimeType: String,
         relativePath: String,
+        isRingtone: Boolean,
     ): SaveResult {
         val resolver = context.contentResolver
         var uri: Uri? = null
@@ -89,6 +107,7 @@ object MediaSaver {
                 put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
                 put(MediaStore.Audio.Media.RELATIVE_PATH, relativePath)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
+                if (isRingtone) put(MediaStore.Audio.Media.IS_RINGTONE, 1)
             }
             uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
                 ?: return SaveResult(null, "MediaStore 삽입 실패 ($displayName)")

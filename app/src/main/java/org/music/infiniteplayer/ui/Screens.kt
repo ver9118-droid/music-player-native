@@ -56,6 +56,7 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
@@ -782,6 +783,7 @@ fun NowPlayingScreen(
     onToggleFavorite: () -> Unit,
     onRetry: () -> Unit,
     onDownload: () -> Unit,
+    onRingtone: () -> Unit,
     onRaiseVolume: () -> Unit,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
@@ -947,6 +949,7 @@ fun NowPlayingScreen(
                                 compact = true,
                                 onRetry = onRetry,
                                 onDownload = onDownload,
+                                onRingtone = onRingtone,
                                 onRaiseVolume = onRaiseVolume,
                                 onTogglePlay = onTogglePlay,
                                 onNext = onNext,
@@ -994,6 +997,7 @@ fun NowPlayingScreen(
                     diag = diag,
                     onRetry = onRetry,
                     onDownload = onDownload,
+                    onRingtone = onRingtone,
                     onRaiseVolume = onRaiseVolume,
                     onTogglePlay = onTogglePlay,
                     onNext = onNext,
@@ -1133,6 +1137,7 @@ private fun PlayerDetails(
     compact: Boolean = false,
     onRetry: () -> Unit,
     onDownload: () -> Unit,
+    onRingtone: () -> Unit,
     onRaiseVolume: () -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
@@ -1175,10 +1180,11 @@ private fun PlayerDetails(
         Text(formatTime(durationMs), color = TextSecondary, fontSize = 11.5.sp)
     }
 
-    // 다운로드
+    // 다운로드 / 벨소리
     ActionChips(
         state = state,
         onDownload = onDownload,
+        onRingtone = onRingtone,
     )
 
     Spacer(Modifier.height(if (compact) 6.dp else 10.dp))
@@ -1511,11 +1517,12 @@ private fun ActionButton(text: String, bg: Color, fg: Color, onClick: () -> Unit
     }
 }
 
-/** 다운로드 칩 */
+/** 다운로드 / 벨소리 칩 */
 @Composable
 private fun ActionChips(
     state: PlayerState,
     onDownload: () -> Unit,
+    onRingtone: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -1529,6 +1536,11 @@ private fun ActionChips(
             selected = false,
             icon = Icons.Rounded.Download,
         ) { onDownload() }
+        SmallChip(
+            text = "벨소리",
+            selected = false,
+            icon = Icons.Rounded.Notifications,
+        ) { onRingtone() }
     }
 }
 

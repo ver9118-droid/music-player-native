@@ -1363,6 +1363,116 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /**
+     * 현재 곡의 하이라이트 구간을 벨소리로 저장하고, 바로 기본 벨소리로 적용한다.
+     *
+     *  1) AAC(m4a) 스트림을 내려받는다 (다운로드 버튼과 같은 경로)
+     *  2) HighlightFinder 로 가장 소리 큰 30초 구간을 찾는다
+     *  3) AudioTrimmer 로 잘라내며 페이드 인/아웃을 넣는다
+     *  4) MediaStore 벨소리 목록에 "벨소리-곡명(하이라이트)" 로 저장
+     *  5) RingtoneSetter 로 시스템 기본 벨소리에 바로 설정한다
+     *
+     * "시스템 설정에 쓰기" 권한이 없으면 권한 화면을 열고 토스트로 안내한다.
+     */
+    fun setAsRingtone() {
+        val entry = currentEntry
+        if (entry == null) {
+            toast("재생 중인 곡이 없습니다")
+            return
+        }
+        if (!org.music.infiniteplayer.core.RingtoneSetter.canWriteSettings(this)) {
+            toast("벨소리 권한이 없습니다 · 시스템 설정 권한을 허용해 주세요")
+            org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this)
+            return
+        }
+        scope.launch {
+            val src = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
+            downloadProgress = 0
+            setManualStatus("벨소리 만드는 중...")
+
+            var audio = resolveForFile(entry)
+            if (audio == null) {
+                errorText = "스트림 주소를 얻지 못했습니다"
+                clearManualStatus()
+                toast("벨소리 실패: 스트림 주소를 얻지 못했습니다")
+                publish()
+                return@launch
+            }
+            var res = org.music.infiniteplayer.core.Downloader.download(audio.url, src) { percent ->
+                downloadProgress = percent
+                publish()
+            }
+            if (!res.ok) {
+                entry.audio = null
+                entry.job = null
+                audio = resolveEntry(entry, prefer = listOf(140, 139), useCache = false)
+                if (audio != null) {
+                    res = org.music.infiniteplayer.core.Downloader.download(audio.url, src) { percent ->
+                        downloadProgress = percent
+                        publish()
+                    }
+                }
+            }
+            downloadProgress = -1
+            val useAudio = audio
+            if (!res.ok || useAudio == null) {
+                errorText = "벨소리 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
+                clearManualStatus()
+                toast("벨소리 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
+                publish()
+                return@launch
+            }
+
+            // 디코딩/인코딩은 시간이 걸려서 IO 스레드에서 한다
+            val found = withContext(Dispatchers.IO) {
+                org.music.infiniteplayer.core.HighlightFinder.find(src)
+            }
+            val trimmed = File(cacheDir, "ring_${entry.track.id.hashCode()}.m4a")
+            val ok = withContext(Dispatchers.IO) {
+                org.music.infiniteplayer.core.AudioTrimmer.trim(
+                    src, trimmed, found.startMs, found.lengthMs,
+                )
+            }
+            if (!ok) {
+                errorText = "구간 잘라내기 실패"
+                clearManualStatus()
+                toast("벨소리 실패: 구간 잘라내기에 실패했습니다")
+                publish()
+                return@launch
+            }
+
+            val ext = org.music.infiniteplayer.core.MediaSaver.extensionFor(useAudio.mimeType)
+            val title = org.music.infiniteplayer.core.MediaSaver.safeName(
+                entry.track.title.ifBlank { "곡명" },
+            )
+            val name = "벨소리-$title(하이라이트).$ext"
+            val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
+                this@PlaybackService, trimmed, name, useAudio.mimeType,
+            )
+            if (saved.uri == null) {
+                errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
+                clearManualStatus()
+                toast("벨소리 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
+                publish()
+                return@launch
+            }
+
+            val applied = org.music.infiniteplayer.core.RingtoneSetter.setRingtone(
+                this@PlaybackService, saved.uri,
+            )
+            errorText = ""
+            if (applied) {
+                setManualStatus("벨소리 적용 완료")
+                toast("벨소리 적용 완료 · $name")
+            } else {
+                setManualStatus("벨소리 저장 완료 (권한 필요)")
+                toast("벨소리 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")
+                org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this)
+            }
+            publish()
+        }
+    }
+
     /** 파일명 (확장자는 실제 포맷에 맞춘다) */
     private fun safeFileName(track: Track, mimeType: String): String {
         val raw = if (track.artist.isNotBlank()) "${track.artist} - ${track.title}" else track.title
