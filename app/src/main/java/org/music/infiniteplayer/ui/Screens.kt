@@ -873,21 +873,65 @@ fun NowPlayingScreen(
         val screenWidth = maxWidth
         val screenHeight = maxHeight
 
+        // ── 가로/세로 공통 : 영상(미디어)은 항상 같은 자리에 그린다 ────────
+        //
+        // 영상을 가로/세로 분기 안에 두면 화면을 돌릴 때 뷰가 통째로 지워졌다가
+        // 새로 만들어진다 → Surface 가 재생성되면서 검은 화면이 나온다.
+        // 그래서 자리(순서)를 항상 유지하고, 가로/세로는 모서리·여백·컨트롤만 바꾼다.
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (isLandscape) Modifier else Modifier.padding(horizontal = 20.dp)),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // 세로 전용 상단 바 (가로에서는 아래 오버레이가 담당)
+            PlayerTopBar(
+                visible = !isLandscape,
+                isFavorite = isFavorite,
+                orientationLocked = orientationLocked,
+                onToggleOrientationLock = { orientationLocked = !orientationLocked },
+                onBack = onBack,
+                onToggleFavorite = onToggleFavorite,
+            )
+            // 남는 화면 높이를 영상/앨범아트가 전부 차지한다 (화면 크기 자동 맞춤)
+            PlayerMedia(
+                track = track,
+                thumbUrl = state.thumbUrl,
+                playing = state.playing,
+                positionMs = tick.positionMs,
+                artworkSize = if (isLandscape) minOf(screenWidth, screenHeight) else 268.dp,
+                fillBox = true,
+                rounded = !isLandscape,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .then(if (isLandscape) Modifier else Modifier.padding(vertical = 10.dp)),
+            )
+            // 세로 전용 하단 정보 (가로에서는 아래 오버레이가 담당)
+            PlayerDetails(
+                visible = !isLandscape,
+                state = state,
+                positionMs = tick.positionMs,
+                durationMs = tick.durationMs,
+                diag = diag,
+                onRetry = onRetry,
+                onDownload = onDownload,
+                onRingtone = onRingtone,
+                onRaiseVolume = onRaiseVolume,
+                onTogglePlay = onTogglePlay,
+                onNext = onNext,
+                onPrev = onPrev,
+                onSeek = onSeek,
+                onShuffle = onShuffle,
+                onRepeat = onRepeat,
+            )
+        }
+
         if (isLandscape) {
-            // ── 가로 전체 화면 ─────────────────────────────────
+            // ── 가로 오버레이 (영상 위에 얹는 컨트롤) ─────────────────────
+            // 영상은 위의 공통 영역에 그대로 있으므로, 여기에는 컨트롤만 둔다.
             // 탭하면 컨트롤이 나타나고, 가만히 두면 다시 영상만 보인다.
             Box(Modifier.fillMaxSize()) {
-                PlayerMedia(
-                    track = track,
-                    thumbUrl = state.thumbUrl,
-                    playing = state.playing,
-                    positionMs = tick.positionMs,
-                    artworkSize = minOf(screenWidth, screenHeight),
-                    modifier = Modifier.fillMaxSize(),
-                    rounded = false,
-                    // 가로도 세로와 같은 방식으로 맞춘다 (영상 잘림 없음 · 전체가 다 보인다)
-                )
-
                 // 영상 위를 탭하면 컨트롤 표시/숨김 (PlayerView 가 터치를 먹지 않도록 위에 둔다)
                 Box(
                     modifier = Modifier
@@ -962,51 +1006,6 @@ fun NowPlayingScreen(
                     }
                 }
             }
-        } else {
-            // ── 세로: 화면 크기에 맞춰 영상/정보가 자동으로 늘어난다 ──────
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                PlayerTopBar(
-                    isFavorite = isFavorite,
-                    orientationLocked = orientationLocked,
-                    onToggleOrientationLock = { orientationLocked = !orientationLocked },
-                    onBack = onBack,
-                    onToggleFavorite = onToggleFavorite,
-                )
-                // 남는 화면 높이를 영상/앨범아트가 전부 차지한다 (화면 크기 자동 맞춤)
-                PlayerMedia(
-                    track = track,
-                    thumbUrl = state.thumbUrl,
-                    playing = state.playing,
-                    positionMs = tick.positionMs,
-                    artworkSize = 268.dp,
-                    fillBox = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(vertical = 10.dp),
-                )
-                PlayerDetails(
-                    state = state,
-                    positionMs = tick.positionMs,
-                    durationMs = tick.durationMs,
-                    diag = diag,
-                    onRetry = onRetry,
-                    onDownload = onDownload,
-                    onRingtone = onRingtone,
-                    onRaiseVolume = onRaiseVolume,
-                    onTogglePlay = onTogglePlay,
-                    onNext = onNext,
-                    onPrev = onPrev,
-                    onSeek = onSeek,
-                    onShuffle = onShuffle,
-                    onRepeat = onRepeat,
-                )
-            }
         }
     }
 }
@@ -1024,12 +1023,16 @@ private fun Context.findActivity(): Activity? {
 /** 지금 재생 상단 바 (접기 · 제목 · 화면 잠금 · 즐겨찾기) */
 @Composable
 private fun PlayerTopBar(
+    visible: Boolean = true,
     isFavorite: Boolean,
     orientationLocked: Boolean,
     onToggleOrientationLock: () -> Unit,
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
 ) {
+    // 가로에서는 오버레이 쪽 상단 바가 담당 → 세로용 상단 바는 그리지 않는다
+    // (단, 호출 자리 자체는 항상 유지해서 미디어 영역이 밀리지 않게 한다)
+    if (!visible) return
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1082,7 +1085,15 @@ private fun PlayerMedia(
     rounded: Boolean = true,
     fillBox: Boolean = false,
 ) {
-    BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
+    // 모서리 둥글기는 바깥 박스에만 준다.
+    // 영상 뷰(TrackVideo)의 modifier 는 항상 같아야 가로↔세로 전환 때
+    // 뷰가 지워졌다가 다시 만들어지지 않는다.
+    BoxWithConstraints(
+        modifier = modifier.then(
+            if (rounded) Modifier.clip(RoundedCornerShape(20.dp)) else Modifier,
+        ),
+        contentAlignment = Alignment.Center,
+    ) {
         // 주어진 영역(화면 크기)에 맞춰 앨범아트 크기를 자동으로 정한다
         val artSize = if (fillBox) {
             minOf(maxWidth, maxHeight).coerceAtLeast(96.dp)
@@ -1103,11 +1114,7 @@ private fun PlayerMedia(
                 track = track,
                 playing = playing,
                 positionMs = positionMs,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(
-                        if (rounded) Modifier.clip(RoundedCornerShape(20.dp)) else Modifier,
-                    ),
+                modifier = Modifier.fillMaxSize(),
                 fallback = {
                     Artwork(
                         url = thumbUrl,
@@ -1128,6 +1135,7 @@ private fun PlayerMedia(
  */
 @Composable
 private fun PlayerDetails(
+    visible: Boolean = true,
     state: PlayerState,
     positionMs: Long,
     durationMs: Long,
@@ -1144,6 +1152,9 @@ private fun PlayerDetails(
     onShuffle: (Boolean) -> Unit,
     onRepeat: (String) -> Unit,
 ) {
+    // 가로에서는 오버레이 쪽 하단 정보가 담당 → 세로용 정보는 그리지 않는다
+    // (호출 자리는 항상 유지해서 미디어 영역이 밀리지 않게 한다)
+    if (!visible) return
     // 곡 정보
     Text(
         text = state.title.ifBlank { "-" },

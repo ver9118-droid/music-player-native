@@ -86,14 +86,24 @@ private object VideoPlayerCache {
     private var streamKey: String? = null
     private var instance: ExoPlayer? = null
 
+    /**
+     * 플레이어 + "몇 번째로 빌렸는지" 번호.
+     * 화면 전환 때 **지금 쓰는 구성**과 **방금 사라진 구성**을 구분하는 데 쓴다.
+     */
+    class Lease(val player: ExoPlayer, val token: Int)
+
+    /** acquire 마다 1 씩 늘어난다 */
+    private var token = 0
+
     /** 같은 영상이면 지금 보관 중인 플레이어를, 다른 영상이면 새로 만든다. */
-    fun acquire(key: String, create: () -> ExoPlayer): ExoPlayer {
+    fun acquire(key: String, create: () -> ExoPlayer): Lease {
         cancelPending()
+        token += 1
         val current = instance
         if (current != null) {
             if (streamKey == key) {
-                // 회전/레이아웃 전환 → 같은 플레이어 그대로 이어 붙인다 (재준비 없음)
-                return current
+                // 전환/재구성 → 같은 플레이어 그대로 이어 붙인다 (재준비 없음)
+                return Lease(current, token)
             }
             // 다른 곡 → 지금 보던 플레이어는 정리하고 새로 만든다
             releaseNow()
@@ -101,13 +111,19 @@ private object VideoPlayerCache {
         val created = create()
         instance = created
         streamKey = key
-        return created
+        return Lease(created, token)
     }
 
-    /** 화면이 없어졌을 때: 잠시 보관했다가 아무도 안 쓰면 해제한다. */
-    fun releaseLater(player: ExoPlayer?) {
-        // 지금 보관 중인 플레이어와 다른(이미 교체된) 플레이어라면 건드리지 않는다
-        if (player == null || instance !== player) return
+    /**
+     * 화면이 없어졌을 때: 잠시 보관했다가 아무도 안 쓰면 해제한다.
+     *
+     * Composition 이 새로 만들어진 **뒤에** 사라진 구성의 onDispose 가 실행되면
+     * 방금 산 플레이어까지 건드릴 수 있다. 그래서 빌려 간 번호(lease.token) 가
+     * 현재 번호와 같을 때만 해제를 예약한다.
+     */
+    fun releaseLater(lease: Lease) {
+        if (lease.token != token) return          // 이전 구성의 해제 요청 → 무시
+        if (instance !== lease.player) return     // 이미 다른 플레이어로 교체됨 → 무시
         cancelPending()
         val job = Runnable { releaseNow() }
         pending = job
@@ -117,7 +133,10 @@ private object VideoPlayerCache {
     /** 영상 주소가 없어졌을 때: 더 이상 쓸 수 없으니 보관 중이면 해제 예약 */
     fun discard() {
         if (instance == null) return
-        releaseLater(instance)
+        cancelPending()
+        val job = Runnable { releaseNow() }
+        pending = job
+        handler.postDelayed(job, HOLD_MS)
     }
 
     private fun cancelPending() {
@@ -255,25 +274,27 @@ fun TrackVideo(
         if (next != null && next.id != track.id) prefetchVideo(next, quality)
     }
 
-    val player: ExoPlayer? = remember(url) {
+    // 회전/화면 전환으로 레이아웃이 다시 만들어져도 같은 플레이어를 이어 쓴다
+    // (다시 준비하면 1~2초짜리 끊김이 생긴다)
+    val lease: VideoPlayerCache.Lease? = remember(url) {
         val streamUrl = url ?: return@remember null
-        // 회전/화면 전환으로 레이아웃이 다시 만들어져도 같은 플레이어를 이어 쓴다
-        // (다시 준비하면 1~2초짜리 끊김이 생긴다)
         VideoPlayerCache.acquire(streamUrl) {
             createVideoPlayer(context, streamUrl, playing)
         }
     }
+    val player: ExoPlayer? = lease?.player
 
     // 영상 주소가 없어졌으면(실패/재해석 중) 보관 중인 플레이어를 정리한다
     LaunchedEffect(url) {
         if (url == null) VideoPlayerCache.discard()
     }
 
-    DisposableEffect(player) {
-        val p = player
-        if (p == null) {
+    DisposableEffect(lease) {
+        val current = lease
+        if (current == null) {
             onDispose { }
         } else {
+            val p = current.player
             var firstReady = false
             val listener = object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
@@ -293,14 +314,14 @@ fun TrackVideo(
             }
             p.addListener(listener)
             // 화면을 열었을 때 이미 곡이 진행 중이면 그 위치부터 영상을 보여준다
-            // (회전으로 다시 붙일 때는 위치가 거의 같으니 불필요한 이동을 하지 않는다)
+            // (전환으로 다시 붙일 때는 위치가 거의 같으니 불필요한 이동을 하지 않는다)
             if (positionMs > 1_500L && abs(p.currentPosition - positionMs) > 1_500L) {
                 runCatching { p.seekTo(positionMs) }
             }
             onDispose {
                 p.removeListener(listener)
-                // 회전 직후 다시 붙일 수 있으니 바로 해제하지 않고 잠시 보관한다
-                VideoPlayerCache.releaseLater(p)
+                // 방금 새로 쓰기 시작한 플레이어는 건드리지 않고, 잠시 뒤 해제한다
+                VideoPlayerCache.releaseLater(current)
             }
         }
     }
