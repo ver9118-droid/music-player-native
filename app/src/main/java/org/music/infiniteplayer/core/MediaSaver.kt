@@ -3,6 +3,7 @@
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -100,12 +101,9 @@ object MediaSaver {
      * 벨소리로 저장 — **저장소 루트 `Ringtones` 에 한 개만** 만든다.
      *
      * 순서:
-     *  ① 루트 `Ringtones` 에 같은 이름이 이미 있으면 → 그 URI 재사용 (ID 유지 → 하이라이트 유지)
-     *  ② 음악 폴더에 **우리 앱이 만든 사본**(`곡명 (벨소리).ext`) 이 있으면 →
-     *     파일을 새로 만들지 않고 **그 행을 루트 `Ringtones` 로 옮긴다**
-     *     (ID 가 그대로 유지되므로 사운드 선택기의 하이라이트 구간이 살아 있고,
-     *      목록에 같은 곡이 두 개로 보이지 않는다)
-     *  ③ 아무것도 없으면 새로 삽입
+     *  ① 같은 이름 사본이 이미 있으면 → `keepSingleCopy` 로 **한 개만** 남긴다
+     *     (새 파일을 만들지 않고 기존 MediaStore 행을 재사용 → ID 유지 → 하이라이트 유지)
+     *  ② 아무것도 없으면 루트 `Ringtones` 에 새로 삽입
      *
      * 사용자가 직접 넣어 둔 파일은 옮기거나 지우지 않는다 (앱이 만든 이름만 처리).
      */
@@ -119,13 +117,11 @@ object MediaSaver {
         val name = safeName(displayName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
-            findExisting(resolver, name, RING_ROOT_DIR)?.let { return@withContext SaveResult(it, "") }
-
-            // 이전 버전이 음악 폴더에 만들어 둔 사본 → 행을 옮긴다 (새 사본 금지)
-            val old = findExisting(resolver, name, RING_DIR)
-            if (old != null && isAppCreated(name)) {
-                val moved = moveToRingtoneFolder(resolver, old)
-                if (moved != null) return@withContext SaveResult(moved, "")
+            if (isAppCreated(name)) {
+                // 앱이 만든 파일 → 이미 있으면 재사용/정리 (사용자 파일과 구분)
+                keepSingleCopy(context, name)?.let { return@withContext SaveResult(it, "") }
+            } else {
+                findExisting(resolver, name, RING_ROOT_DIR)?.let { return@withContext SaveResult(it, "") }
             }
 
             insert(context, file, name, mime, RING_ROOT_DIR, isRingtone = true)
@@ -148,26 +144,59 @@ object MediaSaver {
     ): SaveResult = saveAsRingtone(context, file, displayName, mimeType)
 
     /**
-     * 같은 이름 파일을 찾는다 — **저장소 루트 `Ringtones` 우선**, 그 다음 음악 폴더.
+     * 같은 이름 사본이 두 곳에 있으면 **한 개만** 남긴다 (이전 버전이 두 곳에 저장해 둔 파일 정리).
      *
-     * (이전 버전이 두 곳에 사본을 만들어 둔 파일을 "같은 곡" 으로 인식하게 한다)
+     *  - **현재 울리고 있는 쪽** 의 행을 유지한다 — 사운드 선택기의 하이라이트 구간은
+     *    MediaStore ID(URI) 에 저장되어 있으므로, 그 ID 를 유지해야 구간이 살아 있다.
+     *  - 유지하는 행은 루트 `Ringtones` 로 **옮긴다** (파일을 복사하지 않는다 → ID 유지).
+     *  - 다른 사본은 **앱이 만든 행일 때만** 지운다. 사용자가 직접 넣어 둔 파일은 삭제하지 않는다.
+     *
+     * 같은 이름 파일이 하나도 없으면 null (그때는 새로 삽입하면 된다).
      */
-    fun findExistingByName(context: Context, displayName: String): Uri? {
+    fun keepSingleCopy(context: Context, displayName: String): Uri? {
         val resolver = context.contentResolver
         val name = safeName(displayName)
-        return findExisting(resolver, name, RING_ROOT_DIR) ?: findExisting(resolver, name, RING_DIR)
+        val root = findExisting(resolver, name, RING_ROOT_DIR)
+        val music = findExisting(resolver, name, RING_DIR)
+        if (root == null && music == null) return null
+
+        val current = try {
+            RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE)
+        } catch (_: Exception) {
+            null
+        }
+
+        // 현재 벨소리로 걸려 있는 쪽의 ID 를 유지한다 (하이라이트가 그 ID 에 붙어 있다)
+        val keep = (if (current != null && current == music) music else (root ?: music)) ?: return null
+        val drop = if (keep == music) root else music
+
+        if (drop != null && isAppCreated(name) && ownedByApp(resolver, drop, context.packageName)) {
+            try {
+                resolver.delete(drop, null, null)
+            } catch (_: Exception) {
+                // 앱이 소유하지 않은 행은 지울 수 없다 → 그대로 두고 유지하는 행만 처리한다
+            }
+        }
+
+        // 앱이 만든 파일만 폴더를 옮긴다 (사용자가 넣은 파일은 그 자리 그대로 둔다)
+        return if (isAppCreated(name)) moveToRingtoneFolder(resolver, keep) ?: keep else keep
     }
 
-    /**
-     * MediaStore **행만** 루트 `Ringtones` 로 옮긴다 (파일을 복사하지 않는다).
-     *
-     * 행 ID 가 유지되므로 사운드 선택기가 그 ID 에 붙여 둔 **하이라이트 구간이 사라지지 않는다.**
-     */
-    fun moveToRingtoneFolder(context: Context, uri: Uri): Uri? =
-        moveToRingtoneFolder(context.contentResolver, uri)
+    /** MediaStore 행을 만든 앱인지 (다른 앱/사용자 파일을 지우지 않기 위해 확인한다) */
+    private fun ownedByApp(resolver: android.content.ContentResolver, uri: Uri, pkg: String): Boolean {
+        return try {
+            // OWNER_PACKAGE_ID (API 29) — 컬럼 이름으로 조회한다 (상수 이름이 버전마다 다르다)
+            val column = "owner_package_id"
+            resolver.query(uri, arrayOf(column), null, null, null)?.use { c ->
+                c.getColumnIndex(column) >= 0 && c.moveToFirst() && c.getString(0) == pkg
+            } ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     /** 앱이 만든 벨소리 파일명인지 (`곡명 (벨소리).ext`) — 사용자 파일은 건드리지 않는다 */
-    fun isAppCreated(displayName: String): Boolean = displayName.contains("(벨소리)")
+    private fun isAppCreated(displayName: String): Boolean = displayName.contains("(벨소리)")
 
     private fun insert(
         context: Context,
@@ -261,6 +290,11 @@ object MediaSaver {
         }
     }
 
+    /**
+     * MediaStore **행만** 루트 `Ringtones` 로 옮긴다 (파일을 복사하지 않는다).
+     *
+     * 행 ID 가 유지되므로 사운드 선택기가 그 ID 에 붙여 둔 **하이라이트 구간이 사라지지 않는다.**
+     */
     private fun moveToRingtoneFolder(
         resolver: android.content.ContentResolver,
         uri: Uri,

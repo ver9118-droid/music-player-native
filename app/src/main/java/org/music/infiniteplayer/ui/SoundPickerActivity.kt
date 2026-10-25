@@ -130,8 +130,9 @@ class SoundPickerActivity : ComponentActivity() {
      *  - **이미 미디어 스토어 파일이면 복사하지 않는다.**
      *    복사하면 MediaStore ID 가 바뀌어 사운드 선택기가 그 ID 에 붙여 둔
      *    **하이라이트 구간이 풀리고, 목록에 같은 곡이 두 개로 보인다.**
-     *    → 같은 이름이 이미 있으면 그 URI 를 재사용하고,
-     *      앱이 만든 사본이 음악 폴더에 있으면 **행만** 루트 `Ringtones` 로 옮긴다.
+     *    → 같은 이름 사본이 이미 있으면 **한 개만** 남긴다 (`keepSingleCopy`):
+     *      현재 울리고 있는 쪽의 행을 유지하고(그 ID 에 하이라이트가 저장되어 있다),
+     *      앱이 만든 다른 사본은 정리한다. 유지하는 행은 루트 `Ringtones` 로 옮긴다.
      *  - SAF/외부 파일일 때만 실제로 복사해 루트 `Ringtones` 에 넣는다
      *    (같은 이름이 이미 있으면 그 행을 재사용한다)
      *  - 처리 실패 시 원본이 미디어 스토어 파일이면 그 URI 를 그대로 쓴다
@@ -148,12 +149,8 @@ class SoundPickerActivity : ComponentActivity() {
             }
 
             if (source.authority == "media") {
-                val existing = MediaSaver.findExistingByName(this, name)
-                if (existing != null) return existing
-                if (MediaSaver.isAppCreated(name)) {
-                    val moved = MediaSaver.moveToRingtoneFolder(this, source)
-                    if (moved != null) return moved
-                }
+                val kept = MediaSaver.keepSingleCopy(this, name)
+                if (kept != null) return kept
                 return source
             }
 
