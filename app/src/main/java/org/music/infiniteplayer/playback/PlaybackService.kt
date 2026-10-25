@@ -1435,7 +1435,12 @@ class PlaybackService : MediaSessionService() {
             var window: org.music.infiniteplayer.core.Highlight.Window? = null
             var mime = useAudio.mimeType
             var fadeFail = ""
-            val w = org.music.infiniteplayer.core.Highlight.analyze(src)
+            // MediaCodec/MediaExtractor 는 블로킹 호출이다 → 메인 스레드에서 돌리면
+            // 구간이 길 때 ANR 위험이 있다. UI 에 알리는 코드(toast/publish) 는
+            // 메인 스레드로 돌아온 뒤 실행되므로 여기서만 IO 로 옮긴다.
+            val w = withContext(Dispatchers.IO) {
+                org.music.infiniteplayer.core.Highlight.analyze(src)
+            }
             if (w != null) {
                 // 페이드 인/아웃은 **파일 안에** 들어 있어야 한다 — 벨소리는 시스템이 재생하므로
                 // 앱이 음량을 조절할 수 없다. 그래서 페이드를 켠 경우에만 PCM 으로 디코딩해
@@ -1446,9 +1451,11 @@ class PlaybackService : MediaSessionService() {
                 var fail = ""
                 val ok = if (fade > 0f) {
                     // null = 성공, 그 외 실패 이유
-                    val reason = org.music.infiniteplayer.core.Highlight.encodeWithFade(
-                        src, cut, w, fade.toDouble(), fade.toDouble(),
-                    )
+                    val reason = withContext(Dispatchers.IO) {
+                        org.music.infiniteplayer.core.Highlight.encodeWithFade(
+                            src, cut, w, fade.toDouble(), fade.toDouble(),
+                        )
+                    }
                     if (reason == null) {
                         mime = "audio/mp4a-latm"
                         true
@@ -1457,7 +1464,10 @@ class PlaybackService : MediaSessionService() {
                         false
                     }
                 } else {
-                    if (org.music.infiniteplayer.core.Highlight.cut(src, cut, w)) true
+                    val copied = withContext(Dispatchers.IO) {
+                        org.music.infiniteplayer.core.Highlight.cut(src, cut, w)
+                    }
+                    if (copied) true
                     else {
                         fail = "샘플 복사 실패"
                         false

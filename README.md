@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `app-release-v3.5.29.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> `app-release-v3.5.30.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -53,6 +53,14 @@
 - **한국대중음악 장르 8종** (유튜브 검색)
 - 재생은 유튜브 InnerTube API 로 직접 스트림 URL 을 받아 ExoPlayer 가 재생
   (별도 다운로드/변환 불필요 → 준비 시간 1~2초)
+
+## v3.5.30 변경 내용
+- **MediaCodec/MediaExtractor 를 백그라운드 스레드에서 실행**
+  - `PlaybackService.scope` 는 `Dispatchers.Main.immediate` 이라 페이드 인코딩이 메인 스레드에서 돌아
+    구간이 길면 ANR 위험이 있었다.
+  - `Highlight.analyze` / `encodeWithFade` / `cut` 호출만 `withContext(Dispatchers.IO)` 로 감쌌다.
+    UI 에 알리는 코드(toast · publish) 는 메인 스레드로 돌아온 뒤 실행된다.
+- versionName 3.5.30 / versionCode 91
 
 ## v3.5.29 변경 내용
 - **페이드 실패의 실제 원인 수정** — `applyGain` 의 버퍼 position 이중 진행
