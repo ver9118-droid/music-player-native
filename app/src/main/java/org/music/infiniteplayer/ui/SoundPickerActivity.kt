@@ -126,7 +126,7 @@ class SoundPickerActivity : ComponentActivity() {
                     tmp.outputStream().use { out -> input.copyTo(out) }
                 } ?: return null
                 val saved = kotlinx.coroutines.runBlocking {
-                    MediaSaver.saveAsRingtone(this, tmp, name, mime)
+                    MediaSaver.saveAsRingtone(this@SoundPickerActivity, tmp, name, mime)
                 }
                 tmp.delete()
                 saved.uri
