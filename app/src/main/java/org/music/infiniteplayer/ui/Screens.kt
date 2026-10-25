@@ -1678,8 +1678,6 @@ fun SettingsScreen(
     onQuality: (String) -> Unit,
     mvEnabled: Boolean,
     onMelonMv: (Boolean) -> Unit,
-    ringSoundPicker: Boolean,
-    onRingSoundPicker: (Boolean) -> Unit,
     favorites: List<Track>,
     onOpenFavorites: () -> Unit,
 ) {
@@ -1860,25 +1858,6 @@ fun SettingsScreen(
                             ctx, "기록을 삭제했습니다", android.widget.Toast.LENGTH_SHORT,
                         ).show()
                     }
-                }
-            }
-
-            item {
-                SectionTitle("벨소리")
-                SettingRow(
-                    title = "사운드 선택기 자동 열기",
-                    subtitle = if (ringSoundPicker) {
-                        "벨소리 적용 후 벨소리 선택 화면(설정 > 벨소리와 같음)을 연다 · " +
-                            "＋ 를 눌러 목록을 열고 \"선택된 하이라이트만 재생\" 을 켠 뒤 선택"
-                    } else {
-                        "벨소리 적용만 하고 선택기는 열지 않는다"
-                    },
-                ) {
-                    Switch(
-                        checked = ringSoundPicker,
-                        onCheckedChange = onRingSoundPicker,
-                        colors = switchColors(),
-                    )
                 }
             }
 

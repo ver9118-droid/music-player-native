@@ -1,10 +1,7 @@
 ﻿package org.music.infiniteplayer.playback
 
 import android.app.PendingIntent
-import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.media.RingtoneManager
 import android.net.Uri
 import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
@@ -36,7 +33,6 @@ import org.music.infiniteplayer.data.ResolvedAudio
 import org.music.infiniteplayer.data.Track
 import org.music.infiniteplayer.data.YoutubeRepository
 import java.io.File
-import java.util.Locale
 import kotlin.random.Random
 
 /**
@@ -1372,10 +1368,13 @@ class PlaybackService : MediaSessionService() {
      * 현재 곡을 벨소리로 저장하고, 바로 기본 벨소리로 적용한다.
      *
      *  1) AAC(m4a) 스트림을 내려받는다 (다운로드 버튼과 같은 경로)
-     *  2) MediaStore 벨소리 목록에 "벨소리-곡명.m4a" 로 저장
-     *  3) RingtoneSetter 로 시스템 기본 벨소리에 바로 설정한다
+     *  2) 갤럭시처럼 **하이라이트 구간을 앱이 직접 찾아** 그 부분만 잘라낸다
+     *     (삼성은 하이라이트를 자기 데이터베이스에 저장하고 밖으로 바꿔 주는 API 가 없다
+     *      → 구간을 파일 자체에 넣으면 사운드 선택기를 열지 않아도 그대로 재생된다)
+     *  3) MediaStore 에 "곡명 (벨소리).m4a" 로 저장 (이미 있는 행은 재사용)
+     *  4) RingtoneSetter 로 시스템 기본 벨소리에 바로 설정한다
      *
-     * (구간 잘라내기 · 페이드 인/아웃 · 하이라이트 자동 탐색은 제거)
+     * 분석이나 잘라내기가 실패하면 곡 전체를 그대로 저장한다.
      *
      * "시스템 설정에 쓰기" 권한이 없으면 권한 화면을 열고 토스트로 안내한다.
      */
@@ -1428,15 +1427,29 @@ class PlaybackService : MediaSessionService() {
                 return@launch
             }
 
-            // 잘라내기/재인코딩 없이 받은 그대로 벨소리로 저장한다
             val ext = org.music.infiniteplayer.core.MediaSaver.extensionFor(useAudio.mimeType)
             val title = org.music.infiniteplayer.core.MediaSaver.safeName(
                 entry.track.title.ifBlank { "곡명" },
             )
             // 파일명은 곡명을 앞으로 (사운드 선택기 ＋ 목록에서 곡 이름으로 찾을 수 있게)
             val name = "$title (벨소리).$ext"
+
+            // 2) 갤럭시처럼 하이라이트 구간을 앱이 찾아 그 부분만 잘라낸다.
+            //    (삼성은 하이라이트를 자기 DB 에 저장하고 밖으로 바꿔 주는 API 가 없다
+            //     → 구간을 파일 자체에 넣으면 사운드 선택기를 열지 않아도 그대로 울린다)
+            var clip = src
+            var window: org.music.infiniteplayer.core.Highlight.Window? = null
+            val w = org.music.infiniteplayer.core.Highlight.analyze(src)
+            if (w != null) {
+                val cut = File(cacheDir, "ringtone_cut.${ext}")
+                if (org.music.infiniteplayer.core.Highlight.cut(src, cut, w)) {
+                    clip = cut
+                    window = w
+                }
+            }
+
             val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
-                this@PlaybackService, src, name, useAudio.mimeType,
+                this@PlaybackService, clip, name, useAudio.mimeType,
             )
             if (saved.uri == null) {
                 errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
@@ -1447,7 +1460,6 @@ class PlaybackService : MediaSessionService() {
             }
 
             // 이미 같은 파일이 기본 벨소리로 걸려 있으면 다시 설정하지 않는다.
-            // (재설정하면 사운드 선택기가 저장해 둔 "선택한 하이라이트" 가 풀린다)
             // → 같은 곡인지 는 URI/파일 경로 + 파일명 두 가지로 비교한다
             //   (이전 버전이 만들어 둔 음악 폴더 사본과 루트 Ringtones 는 URI 가 달라서
             //    파일명으로 한 번 더 비교해야 같은 곡을 다시 설정하지 않는다)
@@ -1460,9 +1472,8 @@ class PlaybackService : MediaSessionService() {
             errorText = ""
             if (applied) {
                 setManualStatus("벨소리 적용 완료")
-                toast("벨소리 적용 완료 · $name")
-                // 하이라이트까지 자동으로 잡도록 갤럭시 사운드 선택기를 연다
-                openSoundPicker(saved.uri)
+                val where = if (window != null) " · 하이라이트 ${window.label()}" else " · 곡 전체"
+                toast("벨소리 적용 완료 · $name$where")
             } else {
                 setManualStatus("벨소리 저장 완료 (권한 필요)")
                 toast("벨소리 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")
@@ -1472,139 +1483,6 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    /**
-     * 벨소리 적용 직후 갤럭시 **사운드 선택기**를 연다.
-     *
-     * 삼성 사운드 선택기의 **"선택된 하이라이트만 재생"** 은 공개 API 가 없어
-     * 앱이 직접 켜줄 수 없다. 그래서 다음 화면을 열어 주고, 사용자가
-     * "＋" 를 눌러 곡을 고르고 그 체크를 켜면 시스템이 하이라이트를 잡아준다.
-     * (벨소리 자체는 이미 위에서 자동 적용된 상태)
-     *
-     * 후보를 차례로 시도하며, 하나도 없으면 조용히 넘어간다.
-     */
-    private fun openSoundPicker(saved: Uri?) {
-        if (!Prefs.ringtoneSoundPicker) return
-
-        val pkg = "com.samsung.android.app.soundpicker"
-        val candidates = mutableListOf<Intent>()
-
-        // 1) **1순위**: 사운드 선택기 안의 "벨소리 선택" 화면
-        //    = 휴대폰 설정 > 소리 > 벨소리 > ＋ 를 누르는 바로 그 화면
-        //    (상단에 "선택된 하이라이트만 재생" 스위치가 있고, 여기서 ＋ 를 눌러 곡을 고른다)
-        //    현재 적용 중인 곡은 미리 선택되도록 EXTRA_RINGTONE_EXISTING_URI 를 넣는다
-        try {
-            val probe = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).setPackage(pkg)
-            val hit = packageManager.queryIntentActivities(probe, 0)
-                .firstOrNull()?.activityInfo
-            if (hit != null) {
-                candidates.add(
-                    Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
-                        .setComponent(ComponentName(hit.packageName, hit.name))
-                        .apply {
-                            if (saved != null) {
-                                putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
-                            }
-                        },
-                )
-            }
-        } catch (_: Exception) {
-            // 다음 후보로
-        }
-
-        // 2) 그 다음: "＋ 목록"(음원 선택) 화면을 바로 여는 인텐트.
-        //    위 화면이 없을 때만 쓴다 (이 화면엔 하이라이트 스위치가 없다).
-        //    단, 삼성 패키지가 아닌 곳(시스템 파일 선택기)이 잡히면 제외한다.
-        fun addSoundPickerAudio(action: String) {
-            try {
-                val probe = Intent(action).setType("audio/*").setPackage(pkg)
-                val hit = packageManager.queryIntentActivities(probe, 0)
-                    .firstOrNull { it.activityInfo.packageName == pkg }?.activityInfo
-                if (hit != null) {
-                    candidates.add(
-                        Intent(action).setType("audio/*")
-                            .setComponent(ComponentName(hit.packageName, hit.name)),
-                    )
-                }
-            } catch (_: Exception) {
-                // 다음 후보로
-            }
-        }
-        addSoundPickerAudio(Intent.ACTION_GET_CONTENT)
-        addSoundPickerAudio(Intent.ACTION_PICK)
-
-        // 3) 사운드 선택기 앱 실행 화면 (기기마다 다른 화면이 뜬다)
-        try {
-            packageManager.getLaunchIntentForPackage(pkg)?.let { candidates.add(it) }
-        } catch (_: Exception) {
-            // 다음 후보로
-        }
-
-        // 4) 패키지 안에서 벨소리/선택 화면으로 보이는 액티비티 (위 두 개가 없을 때)
-        try {
-            @Suppress("DEPRECATION")
-            val names = packageManager.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
-                .activities?.map { it.name }.orEmpty()
-            if (names.isNotEmpty()) {
-                // 다음에 원인을 찾을 수 있도록 진단 기록에 남긴다
-                CrashLog.saveText("사운드 선택기 액티비티: ${names.joinToString(", ")}")
-            }
-            val preferred = names.firstOrNull { n ->
-                val s = n.substringAfterLast('.').lowercase(Locale.ROOT)
-                s.contains("ringtone") || s.contains("add")
-            }
-            if (preferred != null) {
-                candidates.add(Intent().setComponent(ComponentName(pkg, preferred)))
-            }
-        } catch (_: Exception) {
-            // 다음 후보로
-        }
-
-        // 4) 일반 벨소리 선택 화면 (저장한 곡이 목록에 그대로 보인다)
-        candidates.add(
-            Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
-            },
-        )
-
-        // 실제로 열 수 있는 첫 번째 후보를 연다 (열기 실패하면 다음 후보로)
-        var started = false
-        for (cand in candidates) {
-            val resolvable = try {
-                cand.resolveActivity(packageManager) != null
-            } catch (_: Exception) {
-                false
-            }
-            if (!resolvable) continue
-            try {
-                // 결과를 받아 우리 앱이 실제로 벨소리로 적용하도록 중간 창을 거친다
-                // (선택기 인텐트에는 NEW_TASK 를 붙이지 않는다 → 결과가 우리 찐으로 돌아온다)
-                startActivity(
-                    Intent(this, org.music.infiniteplayer.ui.SoundPickerActivity::class.java)
-                        .putExtra(org.music.infiniteplayer.ui.SoundPickerActivity.EXTRA_TARGET, cand)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
-                started = true
-                break
-            } catch (_: Exception) {
-                // 권한이 없는 내부 화면이면 건너뛴다
-            }
-        }
-        if (!started) return
-
-        // 사용자가 해야 할 정확한 3 단계를 시스템 토스트로 알려준다
-        // (앱 안 토스트는 화면이 가려져 보이지 않으므로 시스템 토스트를 쓴다)
-        try {
-            android.widget.Toast.makeText(
-                this,
-                "① 벨소리 목록에서 ＋ 를 눌러 목록을 열고\n" +
-                    "② 상단 \"선택된 하이라이트만 재생\" 을 켠 뒤 곡을 선택하세요\n" +
-                    "(체크를 안 하면 노래 처음부터 재생됩니다)",
-                android.widget.Toast.LENGTH_LONG,
-            ).show()
-        } catch (_: Exception) {
-            // 안내 실패는 재생에 영향을 주지 않으므로 무시한다
-        }
-    }
 
     /** 파일명 (확장자는 실제 포맷에 맞춘다) */
     private fun safeFileName(track: Track, mimeType: String): String {

@@ -30,7 +30,6 @@ object Prefs {
     const val KEY_LAST_ERROR_AT = "last_error_at" // 최근 오류 시각
     const val KEY_DIAGNOSTICS = "diagnostics"     // 진단 모드 (오류 표시·기록)
     const val KEY_MELON_MV = "melon_mv_enabled"   // 멜론 최신 뮤직비디오 사용
-    const val KEY_RINGTONE_PICKER = "ringtone_sound_picker" // 벨소리 후 사운드 선택기 열기
 
     fun init(ctx: Context) {
         if (!::sp.isInitialized) {
@@ -102,21 +101,6 @@ object Prefs {
     var melonMvEnabled: Boolean
         get() = sp.getBoolean(KEY_MELON_MV, true)
         set(v) = sp.edit().putBoolean(KEY_MELON_MV, v).apply()
-
-    /**
-     * 벨소리 적용 직후 갤럭시 "사운드 선택기"를 자동으로 열어 줄지.
-     *
-     * 삼성 사운드 선택기의 **"선택된 하이라이트만 재생"** 은 공개 API 가 없어
-     * 앱이 대신 켜줄 수 없다. 그래서 벨소리 적용을 끝낸 뒤 선택기를 열어 주고,
-     * 사용자가 "선택된 하이라이트만 재생"을 켠 채 같은 곡을 한 번 눌러주면
-     * 시스템이 하이라이트 구간을 자동으로 잡아 벨소리로 만든다.
-     *
-     *  - 켜짐 : 벨소리 적용 완료 후 사운드 선택기를 연다 (기본값)
-     *  - 꺼짐 : 벨소리 적용만 하고 끝 (이전과 동일)
-     */
-    var ringtoneSoundPicker: Boolean
-        get() = sp.getBoolean(KEY_RINGTONE_PICKER, true)
-        set(v) = sp.edit().putBoolean(KEY_RINGTONE_PICKER, v).apply()
 
     // ── 재생목록 복원용 (서비스가 죽어도 곡이 사라지지 않게) ──
     /** 재생목록 전체 (JSON) */

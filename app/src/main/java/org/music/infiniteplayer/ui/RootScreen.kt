@@ -48,7 +48,6 @@ fun RootScreen() {
         mutableStateOf(Prefs.lastSource.ifBlank { Sources.default.key })
     }
     var mvEnabled by remember { mutableStateOf(Prefs.melonMvEnabled) }
-    var ringSoundPicker by remember { mutableStateOf(Prefs.ringtoneSoundPicker) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
@@ -214,11 +213,6 @@ fun RootScreen() {
                 onMelonMv = { b ->
                     mvEnabled = b
                     Prefs.melonMvEnabled = b
-                },
-                ringSoundPicker = ringSoundPicker,
-                onRingSoundPicker = { b ->
-                    ringSoundPicker = b
-                    Prefs.ringtoneSoundPicker = b
                 },
                 onOpenFavorites = { page = PAGE_FAVORITES },
             )
