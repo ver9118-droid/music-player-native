@@ -15,8 +15,8 @@ android {
         applicationId = "org.music.infiniteplayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 73
-        versionName = "3.5.12"
+        versionCode = 74
+        versionName = "3.5.13"
         resourceConfigurations += setOf("ko", "en")
     }
 

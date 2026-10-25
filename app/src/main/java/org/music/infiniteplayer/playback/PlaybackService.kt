@@ -1433,7 +1433,8 @@ class PlaybackService : MediaSessionService() {
             val title = org.music.infiniteplayer.core.MediaSaver.safeName(
                 entry.track.title.ifBlank { "곡명" },
             )
-            val name = "벨소리-$title.$ext"
+            // 파일명은 곡명을 앞으로 (사운드 선택기 ＋ 목록에서 곡 이름으로 찾을 수 있게)
+            val name = "$title (벨소리).$ext"
             val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
                 this@PlaybackService, src, name, useAudio.mimeType,
             )
@@ -1478,6 +1479,27 @@ class PlaybackService : MediaSessionService() {
 
         val pkg = "com.samsung.android.app.soundpicker"
         val candidates = mutableListOf<Intent>()
+
+        // 0) "＋ 목록"(음원 선택) 화면을 바로 여는 인텐트.
+        //    삼성 사운드 선택기가 audio/* 를 직접 받으면 그 화면(하이라이트 체크가 있는 화면)이 뜬다.
+        //    단, 삼성 패키지가 아닌 곳(시스템 파일 선택기)이 잡히면 제외한다.
+        fun addSoundPickerAudio(action: String) {
+            try {
+                val probe = Intent(action).setType("audio/*").setPackage(pkg)
+                val hit = packageManager.queryIntentActivities(probe, 0)
+                    .firstOrNull { it.activityInfo.packageName == pkg }?.activityInfo
+                if (hit != null) {
+                    candidates.add(
+                        Intent(action).setType("audio/*")
+                            .setComponent(ComponentName(hit.packageName, hit.name)),
+                    )
+                }
+            } catch (_: Exception) {
+                // 다음 후보로
+            }
+        }
+        addSoundPickerAudio(Intent.ACTION_GET_CONTENT)
+        addSoundPickerAudio(Intent.ACTION_PICK)
 
         // 1) 사운드 선택기 안의 "벨소리 선택" 화면 (+ 를 누르는 그 목록)
         try {
@@ -1553,9 +1575,9 @@ class PlaybackService : MediaSessionService() {
         try {
             android.widget.Toast.makeText(
                 this,
-                "① 벨소리 목록에서 ＋ 를 누르고\n" +
-                    "② 상단 \"선택된 하이라이트만 재생\" 을 켠 뒤 곡을 선택하세요\n" +
-                    "(체크를 안 하면 노래 처음부터 재생됩니다)",
+                "찾을 파일: \"곡명 (벨소리)\"\n" +
+                    "① ＋ 를 눌러 목록을 열고 ② 상단 \"선택된 하이라이트만 재생\" 을 켠 뒤\n" +
+                    "③ 곡을 선택 → 완료 (체크 안 하면 처음부터 재생됩니다)",
                 android.widget.Toast.LENGTH_LONG,
             ).show()
         } catch (_: Exception) {

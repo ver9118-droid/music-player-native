@@ -24,13 +24,13 @@ object MediaSaver {
     private const val MUSIC_DIR = "Music/무한 음악 플레이어"
 
     /**
-     * 벨소리 저장 폴더 (**저장소 루트** 의 `Ringtones`).
+     * 벨소리 저장 폴더 (음악 폴더 `Music/` 바로 아래).
      *
-     * 갤럭시 "사운드 선택기 / 설정 > 소리 및 진동 > 벨소리" 목록은
-     * 저장소 루트의 `Ringtones` 폴더와 `IS_RINGTONE` 플래그를 기준으로 읽는다.
-     * 그래서 `Music/Ringtones` 처럼 뮤직 폴더 안에 넣으면 목록에 아예 안 뜬다.
+     * 삼성 **사운드 선택기(＋ 목록)** 는 음악 폴더 계열 파일만 모아 보여주기 때문에
+     * 저장소 루트의 `Ringtones` 에 넣으면 목록에 아예 안 뜬다.
+     * (Music 바로 아래 + `IS_MUSIC=1` 로 "모두/음악/폴더" 목록 어디에서도 보이게 한다)
      */
-    private const val RING_DIR = "Ringtones"
+    private const val RING_DIR = "Music"
 
     /**
      * MIME 타입 정리.
@@ -110,6 +110,9 @@ object MediaSaver {
         val resolver = context.contentResolver
         var uri: Uri? = null
         try {
+            // 같은 이름 파일이 이미 있으면 먼저 지운다 (반복 적용마다 사본이 쌓이는 방지)
+            if (isRingtone) removeExisting(resolver, displayName, relativePath)
+
             val values = ContentValues().apply {
                 put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
                 // 목록에 제목으로 보이게 (파일명과 별개로 표시될 수 있음)
@@ -118,8 +121,11 @@ object MediaSaver {
                 put(MediaStore.Audio.Media.RELATIVE_PATH, relativePath)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
                 if (isRingtone) {
-                    // 벨소리 목록에 뜨도록 (갤럭시 사운드 선택기 / 설정 > 벨소리)
+                    // 벨소리 목록에 뜨도록 (설정 > 소리 및 진동 > 벨소리)
                     put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+                    // 사운드 선택기(＋ 목록)는 음악 파일만 모아 보여준다.
+                    // IS_MUSIC 이 0 이면 목록에 안 뜬다 → 1 로 설정해 찾을 수 있게 한다.
+                    put(MediaStore.Audio.Media.IS_MUSIC, 1)
                 }
             }
             uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
@@ -137,6 +143,38 @@ object MediaSaver {
             } catch (_: Exception) {
             }
             return SaveResult(null, e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    /** 같은 폴더에 같은 이름 파일이 있으면 삭제한다 (반복 적용 시 사본 방지) */
+    private fun removeExisting(
+        resolver: android.content.ContentResolver,
+        displayName: String,
+        relativePath: String,
+    ) {
+        try {
+            resolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(MediaStore.Audio.Media._ID),
+                "${MediaStore.Audio.Media.DISPLAY_NAME}=? AND (" +
+                    "${MediaStore.Audio.Media.RELATIVE_PATH}=? OR " +
+                    "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?)",
+                arrayOf(displayName, "$relativePath/", "$relativePath/%"),
+                null,
+            )?.use { c ->
+                val idIndex = c.getColumnIndex(MediaStore.Audio.Media._ID)
+                while (c.moveToNext()) {
+                    val id = c.getLong(idIndex)
+                    resolver.delete(
+                        android.content.ContentUris.withAppendedId(
+                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id,
+                        ),
+                        null, null,
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            // 조회/삭제 실패는 저장을 막지 않는다 (같은 이름 사본이 하나 더 생길 뿐)
         }
     }
 
