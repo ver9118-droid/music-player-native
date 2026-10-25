@@ -1480,8 +1480,25 @@ class PlaybackService : MediaSessionService() {
         val pkg = "com.samsung.android.app.soundpicker"
         val candidates = mutableListOf<Intent>()
 
-        // 0) "＋ 목록"(음원 선택) 화면을 바로 여는 인텐트.
-        //    삼성 사운드 선택기가 audio/* 를 직접 받으면 그 화면(하이라이트 체크가 있는 화면)이 뜬다.
+        // 1) **1순위**: 사운드 선택기 안의 "벨소리 선택" 화면
+        //    = 휴대폰 설정 > 소리 > 벨소리 > ＋ 를 누르는 바로 그 화면
+        //    (상단에 "선택된 하이라이트만 재생" 스위치가 있고, 여기서 ＋ 를 눌러 곡을 고른다)
+        try {
+            val probe = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).setPackage(pkg)
+            val hit = packageManager.queryIntentActivities(probe, 0)
+                .firstOrNull()?.activityInfo
+            if (hit != null) {
+                candidates.add(
+                    Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+                        .setComponent(ComponentName(hit.packageName, hit.name)),
+                )
+            }
+        } catch (_: Exception) {
+            // 다음 후보로
+        }
+
+        // 2) 그 다음: "＋ 목록"(음원 선택) 화면을 바로 여는 인텐트.
+        //    위 화면이 없을 때만 쓴다 (이 화면엔 하이라이트 스위치가 없다).
         //    단, 삼성 패키지가 아닌 곳(시스템 파일 선택기)이 잡히면 제외한다.
         fun addSoundPickerAudio(action: String) {
             try {
@@ -1501,29 +1518,14 @@ class PlaybackService : MediaSessionService() {
         addSoundPickerAudio(Intent.ACTION_GET_CONTENT)
         addSoundPickerAudio(Intent.ACTION_PICK)
 
-        // 1) 사운드 선택기 안의 "벨소리 선택" 화면 (+ 를 누르는 그 목록)
-        try {
-            val probe = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).setPackage(pkg)
-            val hit = packageManager.queryIntentActivities(probe, 0)
-                .firstOrNull()?.activityInfo
-            if (hit != null) {
-                candidates.add(
-                    Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
-                        .setComponent(ComponentName(hit.packageName, hit.name)),
-                )
-            }
-        } catch (_: Exception) {
-            // 다음 후보로
-        }
-
-        // 2) 사운드 선택기 앱 실행 화면 (기기마다 다른 화면이 뜬다)
+        // 3) 사운드 선택기 앱 실행 화면 (기기마다 다른 화면이 뜬다)
         try {
             packageManager.getLaunchIntentForPackage(pkg)?.let { candidates.add(it) }
         } catch (_: Exception) {
             // 다음 후보로
         }
 
-        // 3) 패키지 안에서 벨소리/선택 화면으로 보이는 액티비티 (위 두 개가 없을 때)
+        // 4) 패키지 안에서 벨소리/선택 화면으로 보이는 액티비티 (위 두 개가 없을 때)
         try {
             @Suppress("DEPRECATION")
             val names = packageManager.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
@@ -1580,9 +1582,9 @@ class PlaybackService : MediaSessionService() {
         try {
             android.widget.Toast.makeText(
                 this,
-                "찾을 파일: \"곡명 (벨소리)\"\n" +
-                    "① ＋ 를 눌러 목록을 열고 ② 상단 \"선택된 하이라이트만 재생\" 을 켠 뒤\n" +
-                    "③ 곡을 선택 → 완료 (체크 안 하면 처음부터 재생됩니다)",
+                "① 벨소리 목록에서 ＋ 를 눌러 목록을 열고\n" +
+                    "② 상단 \"선택된 하이라이트만 재생\" 을 켠 뒤 곡을 선택하세요\n" +
+                    "(체크를 안 하면 노래 처음부터 재생됩니다)",
                 android.widget.Toast.LENGTH_LONG,
             ).show()
         } catch (_: Exception) {

@@ -33,6 +33,16 @@ object MediaSaver {
     private const val RING_DIR = "Music"
 
     /**
+     * **설정 > 소리 및 진동 > 벨소리** 목록이 읽는 폴더 = 저장소 루트 `Ringtones`.
+     *
+     * 두 목록이 폴더를 다르게 읽는다:
+     *  - 사운드 선택기(＋ 목록) → 음악 폴더(`RING_DIR`)
+     *  - 설정 벨소리 목록     → 루트 `Ringtones` (`RING_ROOT_DIR`)
+     * 그래서 벨소리는 **두 곳에 같은 파일을 넣는다** (이중 저장).
+     */
+    private const val RING_ROOT_DIR = "Ringtones"
+
+    /**
      * MIME 타입 정리.
      * 유튜브는 `audio/mp4; codecs="mp4a.40.2"` 처럼 코덱 정보가 붙어오는데,
      * MediaStore 는 `audio/mp4` 형태만 받아들인다. (그대로 넣으면 저장이 실패한다)
@@ -83,7 +93,7 @@ object MediaSaver {
         }
     }
 
-    /** 벨소리 목록에 보이게 저장 (IS_RINGTONE 플래그) */
+    /** 벨소리 목록에 보이게 저장 — **두 폴더에 이중 저장** 후 루트 `Ringtones` URI 반환 */
     suspend fun saveAsRingtone(
         context: Context,
         file: File,
@@ -93,7 +103,32 @@ object MediaSaver {
         val mime = plainMime(mimeType)
         val name = safeName(displayName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            insert(context, file, name, mime, RING_DIR, isRingtone = true)
+            // ① 사운드 선택기(＋ 목록) 가 모아 보여주는 음악 폴더
+            val music = insert(context, file, name, mime, RING_DIR, isRingtone = true)
+            // ② 설정 > 벨소리 목록이 읽는 저장소 루트 Ringtones (실패해도 ① 은 유지)
+            val root = insert(context, file, name, mime, RING_ROOT_DIR, isRingtone = true)
+            // 둘 중 하나라도 성공하면 성공으로 친다 (설정 목록용 URI 를 우선 반환)
+            if (root.uri != null) root else music
+        } else {
+            copyLegacy(context, file, name, mime, Environment.DIRECTORY_MUSIC)
+            copyLegacy(context, file, name, mime, Environment.DIRECTORY_RINGTONES)
+        }
+    }
+
+    /**
+     * 사운드 선택기에서 고른 소리를 **저장소 루트 `Ringtones`** 에 저장한다.
+     * (설정 > 소리 및 진동 > 벨소리 목록에 뜨게 함)
+     */
+    suspend fun saveToRingtoneFolder(
+        context: Context,
+        file: File,
+        displayName: String,
+        mimeType: String,
+    ): SaveResult = withContext(Dispatchers.IO) {
+        val mime = plainMime(mimeType)
+        val name = safeName(displayName)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            insert(context, file, name, mime, RING_ROOT_DIR, isRingtone = true)
         } else {
             copyLegacy(context, file, name, mime, Environment.DIRECTORY_RINGTONES)
         }

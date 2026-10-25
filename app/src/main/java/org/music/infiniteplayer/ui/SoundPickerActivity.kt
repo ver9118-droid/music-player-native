@@ -102,37 +102,38 @@ class SoundPickerActivity : ComponentActivity() {
     }
 
     /**
-     * 선택 결과를 그대로 벨소리로 쓸 수 있는 URI 로 만든다.
+     * 선택 결과를 **저장소 루트 `Ringtones`** 에 넣고 그 URI 를 돌려준다.
      *
-     *  - `content://media/...` → 이미 미디어 스토어 파일이라 그대로 사용
-     *  - 그 외 (파일 선택기/외부 앱 URI) → 우리 Music 폴더로 복사 후 사용
-     *    (SAF URI 는 재부팅 후에도 시스템이 벨소리로 못 읽는다)
+     *  - 설정 > 벨소리 목록은 저장소 루트 `Ringtones` 만 읽는다
+     *    (Music 폴더에만 있으면 ＋ 목록엔 보이지만 설정 목록엔 안 뜬다)
+     *  - `content://media/...` 라도 Music 폴더 파일일 수 있으므로 **늘 루트로 복사**한다
+     *  - 같은 이름이 있으면 정리되므로 반복할 때마다 사본이 쌓이지 않는다
+     *  - 복사가 실패하고 원본이 이미 미디어 스토어 파일이면 그 URI 를 그대로 쓴다
      */
     private fun prepare(source: Uri): Uri? {
         return try {
-            if (source.authority == "media") {
-                source
+            val mime = contentResolver.getType(source) ?: "audio/mp4"
+            val displayName = queryDisplayName(source) ?: "벨소리"
+            val ext = MediaSaver.extensionFor(mime)
+            val name = if (displayName.lowercase().endsWith(".$ext")) {
+                displayName
             } else {
-                val mime = contentResolver.getType(source) ?: "audio/mp4"
-                val displayName = queryDisplayName(source) ?: "벨소리"
-                val ext = MediaSaver.extensionFor(mime)
-                val name = if (displayName.lowercase().endsWith(".$ext")) {
-                    displayName
-                } else {
-                    "$displayName.$ext"
-                }
-                val tmp = File(cacheDir, "picked_sound.$ext")
-                contentResolver.openInputStream(source)?.use { input ->
-                    tmp.outputStream().use { out -> input.copyTo(out) }
-                } ?: return null
-                val saved = kotlinx.coroutines.runBlocking {
-                    MediaSaver.saveAsRingtone(this@SoundPickerActivity, tmp, name, mime)
-                }
-                tmp.delete()
-                saved.uri
+                "$displayName.$ext"
             }
+            val tmp = File(cacheDir, "picked_sound.$ext")
+            val copied = contentResolver.openInputStream(source)?.use { input ->
+                tmp.outputStream().use { out -> input.copyTo(out) }
+            } != null
+            if (!copied) {
+                return if (source.authority == "media") source else null
+            }
+            val saved = kotlinx.coroutines.runBlocking {
+                MediaSaver.saveToRingtoneFolder(this@SoundPickerActivity, tmp, name, mime)
+            }
+            tmp.delete()
+            saved.uri ?: if (source.authority == "media") source else null
         } catch (_: Exception) {
-            null
+            if (source.authority == "media") source else null
         }
     }
 
