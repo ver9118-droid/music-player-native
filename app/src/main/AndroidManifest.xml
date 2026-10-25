@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -8,6 +9,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 벨소리를 "바로 적용"(시스템 기본 벨소리 설정)하려면 필요한 특별한 권한.
+         설치 후 자동으로 허용되지 않고, 설정 화면에서 사용자가 직접 허용해야 한다.
+         (Play 프로텍트/백신이 민감 권한으로 경고할 수 있음 → 허용해도 되는 권한) -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <!-- 통화 중 일시정지는 오디오 포커스로 처리한다.
          (READ_PHONE_STATE 는 민감 권한이라 백신/Play 프로텍트 오탐 우려가 있어 제거)
          Android 9 이하에서만 음악 라이브러리 저장에 필요 -->
@@ -15,8 +21,14 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
-    <!-- v3.5.22 부터 "바로 적용" 경로가 MediaStore 를 직접 쓰므로 사운드 선택기를
-         열지 않는다 → 패키지 가시성(queries) 은 필요 없다. -->
+    <!-- Android 11+ 패키지 가시성: 벨소리 적용 직후 "갤럭시 사운드 선택기"를
+         찾고 여는 데 필요. 없으면 사운드 선택기가 목록에 안 떠서 열 수 없다. -->
+    <queries>
+        <package android:name="com.samsung.android.app.soundpicker" />
+        <intent>
+            <action android:name="android.intent.action.RINGTONE_PICKER" />
+        </intent>
+    </queries>
 
     <application
         android:name=".App"

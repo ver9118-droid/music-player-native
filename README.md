@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `app-release-v3.5.24.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> `app-release-v3.5.25.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -9,7 +9,7 @@
 | 항목 | 이전 (Kivy) | 현재 (네이티브) |
 |---|---|---|
 | 앱 시작 | 파이썬+OpenGL 초기화로 1.5~3초 | AOT 네이티브, **0.3초 이내** |
-| APK 크기 | 약 60MB | **약 2.3MB** (R8 축소) |
+| APK 크기 | 약 60MB | 약 13MB (R8 축소 미적용) |
 | 백그라운드 재생 | p4a arbitrary service | `MediaSessionService` (공식 방식) |
 | 차량 블루투스 | jnius 로 MediaSession 직접 조작 | `MediaSession` 기본 구현 (표준 호환) |
 | 전화 통화 처리 | 오디오 포커스만 | 오디오 포커스 + `TelephonyCallback` 직접 감지 |
@@ -42,12 +42,8 @@
 ### 4. 자동차 블루투스로 재생/조작한다
 - `MediaSession` 기반 → AVRCP 표준 compliant
   - 차량 화면에 **곡명 · 아티스트 · 앨범 · 앨범아트** 표시
-    (앨범아트는 이미지 바이트로 전달 — `setArtworkData(bytes, PICTURE_TYPE_FRONT_COVER)`)
   - 스티어링훠/키패드로 **재생 · 일시정지 · 이전 · 다음 · 탐색**
   - 알림에서 차량 화면을 누르면 앱으로 이동 (`setSessionActivity`)
-- **AVRCP 는 곡 정보와 이미지만 실어 보낼 수 있어서 영상 자체는 전달되지 않는다**
-  → 차량에 영상을 보내는 유일한 경로는 HDMI/DP 외부 디스플레이(또는 미러링 헤드유닛)이며
-  `playback/CarDisplay.kt` 가 그 디스플레이에 `Presentation` 으로 출력한다 (폰 화면이 꺼진 때만)
 - 차량 연결 방법: 안드로이드 설정 → 블루투스 → 차량 연결 → 오디오 소스에서
   "무한 음악 플레이어" 선택
 
@@ -58,97 +54,17 @@
 - 재생은 유튜브 InnerTube API 로 직접 스트림 URL 을 받아 ExoPlayer 가 재생
   (별도 다운로드/변환 불필요 → 준비 시간 1~2초)
 
-## v3.5.24 변경 내용
-
-### 벨소리 기능 전체 제거 (페이드 인/아웃 포함)
-
-요청에 따라 벨소리 기능을 앱에서 완전히 뗐습니다. 이 버전부터 벨소리 관련 코드·권한·설정 항목이 없습니다.
-
-- 삭제한 파일
-  - `core/Highlight.kt` (하이라이트 구간 분석·잘라내기·페이드 인코딩)
-  - `core/RingtoneSetter.kt` (시스템 기본 벨소리 설정)
-- 제거한 항목
-  - 재생 화면의 **벨소리 칩** (NowPlayingScreen / PlayerPanel / ActionChips)
-  - 설정의 **벨소리 페이드 인/아웃** 행과 설명 문구, `Prefs.ringtoneFade` (`ringtone_fade` 키)
-  - 진단의 **"벨소리 구간"** 행 (`Diagnostics.highlight`)
-  - `PlaybackService.setAsRingtone()`, `lastHighlightInfo`
-  - `AndroidManifest.xml` 의 `WRITE_SETTINGS` 권한 (민감 권한 → 설치 시 경고가 줄어든다)
-    + 불필요해진 `xmlns:tools` 선언
-  - `MediaSaver` 의 벨소리 전용 경로 (`saveAsRingtone`, `keepSingleCopy`, `overwrite`,
-    `findExisting`, `moveToRingtoneFolder`, `RING_DIR`/`RING_LEGACY_DIR`, `isRingtone` 파라미터)
-- **다운로드 기능은 그대로 유지**: Music 폴더(`Music/무한 음악 플레이어`) 저장 경로만 남았다.
-- APK: **2,320,826 B** (이전 2,323,062 B → 제거한 코드만큼 줄어듦)
-- versionName 3.5.24 / versionCode 85
-
-벨소리 관련 설계(하이라이트 가중치, 페이드 인코딩)는 git 기록 `f0caefc` 에 남아 있어
-다시 필요해지면 그 커밋에서 되살릴 수 있다.
-
-## v3.5.23 변경 내용
-
-### 벨소리 하이라이트 구간이 적용되지 않던 문제 수정
-현장에서 보고된 증상: 벨소리를 누르면 하이라이트 구간이 아니라 **곡 처음부터** 재생됐다.
-
-- 원인: 유튜브 fMP4(DASH) 파일은 헤더(`mvhd`)에 곡 길이를 적지 않는 경우가 많다.
-  `Highlight.analyze()` 는 `MediaFormat.KEY_DURATION` 을 읽다가 0/없음 → 분석 실패(null) →
-  호출부가 **곡 전체**를 벨소리로 저장했다.
-- 수정: 곡 길이를 헤더에서 읽는 데 의존하지 않는다. 초 단위 음량을 읽으면서
-  **실제로 측정된 마지막 초**를 곡 길이로 쓴다 (`MAX_SCAN_SECONDS = 600`).
-- `Highlight.render()` 추가: MP4 muxer 가 받아들이지 않는 포맷(opus/webm) 은
-  곡 전체 대신 **AAC 로 재인코딩**해 구간만 담는다.
-- `cut()` 은 `CODEC_CONFIG`(오디오 특화 정보 csd) 샘플을 **먼저** 쓰고 플래그를 보존한다
-  → 잘라낸 파일이 실제로 재생되는 파일이 된다.
-- 페이드 램프는 실제 구간 길이의 절반으로 제한 (짧은 구간에서 인/아웃이 겹치지 않게).
-- 설정 → 진단에 **"벨소리 구간"** 행 추가: 마지막으로 만든 구간과 복사/재인코딩 결과 표시
-  (`0:42 ~ 1:12 · 재인코딩` 처럼 표시 → 기기에서 구간이 실제로 들어갔는지 확인 가능).
-- versionName 3.5.23 / versionCode 84
-
-이미 적용된 벨소리는 같은 곡에서 **벨소리를 한 번 더 누르면** 바뀐다.
-`MediaSaver.overwrite` 가 기존 MediaStore 행의 내용을 교체하므로 새 행이 생기지 않고,
-적용된 벨소리가 잘라낸 구간 파일로 overwritten 된다.
-
-## v3.5.22 변경 내용
-
-### 벨소리 페이드 (페이드인/페이드아웃) — 파일에 기록
-- 벨소리는 **시스템이 재생**하므로 앱이 음량을 조절할 수 없다 → 페이드를 **파일 안에 직접 기록**한다.
-  - `Highlight.encodeWithFade()` : MediaCodec 으로 PCM 을 디코딩해 샘플별 gain 을 입히고
-    AAC-LC(`audio/mp4a-latm`) 로 재인코딩 → MediaMuxer 로 m4a 로 쓴다
-  - 기본값 **1.5초 인 / 1.5초 아웃**, 설정에서 없음/1.0/1.5/2.0/3.0 초 선택 (`Prefs` 키 `ringtone_fade`)
-  - 페이드 0 초이면 기존처럼 **샘플 복사**(재인코딩 없음) 경로로 저장
-  - 페이드를 켜면 확장자가 `.ogg` → `.m4a` 로 바뀌지만 **같은 MediaStore 행을 재사용**한다
-    (`findExisting` 가 기본 이름으로도 검색 → 중복 행 생성 없음)
-  - 인코딩 실패 시 곡 전체를 그대로 쓰는 기존 폴백 유지
-
-### 차량 블루투스 (AVRCP) 곡 정보
-- MediaMetadata 에 **실제 이미지 바이트**를 넣는다 (`setArtworkData(bytes, PICTURE_TYPE_FRONT_COVER)`)
-  - `setBitmap` / `setMetadata` 는 media3 1.5.1 에 없는 API → `setArtworkData` 사용
-  - 세션은 `artworkData` 를 `BitmapLoader` 로 디코딩하므로 압축 이미지 바이트가 가장 확실한 경로
-  - 앨범아트가 준비된 곡당 **1회만** 게시 (`carMetadataTrackId` 가드) → 불필요한 재게시 없음
-- **AVRCP 는 영상 자체를 실어 보낼 수 없다** (곡 정보 + 이미지 바이트만) → 영상은 아래 경로로만 나간다
-
-### 차량 화면에 영상 출력 (`playback/CarDisplay.kt`, 새 파일)
-- HDMI/DP 로 연결된 **외부 디스플레이**(`Display.FLAG_PRESENTATION`) 또는 미러링 헤드유닛이 있을 때
-  `Presentation` 으로 영상을 출력한다 (화면 끔 설정 가능, 기본 켜짐 → `Prefs` 키 `car_video`)
-- 구성: `PlayerView`(컨트롤러 off, RESIZE_MODE_FIT) + 앨범아트 `ImageView` + 곡명 `TextView`
-- **폰 화면이 꺼져 있을 때만** 차량으로 출력 (배터리) — `PowerManager.isInteractive` + SCREEN_ON/OFF 리시버
-- 영상 플레이어는 독립 ExoPlayer (음량 0, 오디오 포커스 요구하지 않음)
-  - 곡별 영상 URL 캐시(60곡) · `failedFor`(영상 없는 곡 재조회 금지) · `resolving`(단일 요청)
-  - `DRIFT_MS = 1500` 어긋남 복원 · `SYNC_MS = 2000` 최소 점검 간격 · `SeekParameters.CLOSEST_SYNC`
-  - 영상 해석 실패/타임아웃(25초) → 앨범아트만 표시
-- `Presentation` 은 `SYSTEM_ALERT_WINDOW` 권한이 필요 없다 (AOSP `PhoneWindowManager` 가
-  `TYPE_PRESENTATION`/`TYPE_PRIVATE_PRESENTATION` 에 `ADD_OKAY` 를 반환) → 새 권한 추가 없음
-  - 단, private 디스플레이는 소유 앱만 볼 수 있어 미러링 헤드유닛은 기기에 따라 안 보일 수 있다
-- 진단 화면에 "차량 디스플레이" 행 추가 (연결된 디스플레이 수/출력 상태)
-
-### APK 크기 (R8 축소 적용)
-- `isMinifyEnabled = true` + `isShrinkResources = true` → **13,272,526 B → 2,323,186 B (약 82% 감소)**
-- 검증 내용:
-  - 앱 코드 클래스 이름이 `mapping.txt` 에 그대로 남는다 (크래시 스택 읽기 가능)
-  - 제거된 앱 코드 항목은 unused lambda / `<clinit>` 뿐 (反射·`Class.forName`·`ServiceLoader` 사용 없음)
-  - `META-INF/services/kotlinx.coroutines.internal.MainDispatcherFactory` → `AndroidDispatcherFactory`
-    보존 확인 (`Dispatchers.Main` 안전) · launcher 아이콘/manifest activity·service·receiver 그대로
-  - 서명 검증 통과 (`CN=Infinite Music Player`)
-- 사운드 선택기용 `<queries>` 는 필요 없어져 manifest 에서 제거 (코드에서 선택기를 열지 않음)
-- versionName 3.5.22 / versionCode 83
+## v3.5.25 변경 내용
+- **벨소리 페이드 인/아웃** (설정 → 음향): 없음 / 1.0 / 1.5 / 2.0 / 3.0초, 기본 1.5초
+  - 벨소리는 **시스템이** 재생하므로 페이드는 파일 안에 실제로 기록되어야 울린다
+    → 페이드를 켠 경우에만 PCM 으로 디코딩해 샘플에 게인 램프를 입히고 AAC-LC 로 재인코딩한다
+  - "없음"을 고르면 음질 변화 없는 샘플 복사 경로로 잘라낸다 (재인코딩 없음)
+  - 저장 토스트에 적용된 페이드 길이가 표시된다 (`곡명 (벨소리) · 하이라이트 0:32 ~ 1:02 · 페이드 1.5초`)
+  - MediaStore 행 이름/타입을 지금 파일에 맞춰 정리한다 — 페이드를 켜고 끄면 `.ogg ↔ .m4a` 로
+    바뀔 수 있어 확장자만 다른 같은 곡이 벨소리 목록에 두 개로 뜨지 않는다
+- v3.5.22 에서 추가했던 **차량 외부 디스플레이 영상 출력**(CarDisplay.kt)과 **R8 축소**는 되돌렸다
+  (v3.5.21 동작 기준 — APK 약 13MB, 차량에는 곡 정보와 앨범아트만 표시)
+- versionName 3.5.25 / versionCode 86
 
 ## v3.5.19 변경 내용
 - **벨소리 = 하이라이트 구간이 적용된 파일로 저장** (갤럭시 "선택된 하이라이트만 재생" 을 앱 안에서 직접 수행)
@@ -168,19 +84,14 @@
   - `openSoundPicker` · `SoundPickerActivity` · 설정의 "사운드 선택기 자동 열기" 스위치 · 관련 테마 삭제
 - 벨소리 파일 위치: **Music 폴더** + `IS_RINGTONE=1` + `IS_MUSIC=1`
   - 사운드 선택기 ＋ 목록(Music 폴더 기반)과 설정 > 벨소리 목록(`IS_RINGTONE=1` 행) **양쪽** 에 보인다
-    (→ v3.5.20 에서 설정 목록이 폴더 기반임이 확인되어 **Ringtones 폴더** 로 변경)
   - 앱이 만든 같은 이름 행이 이미 있으면 **그 행을 재사용**하고 bytes 만 덮어쓴다 (MediaStore ID 유지 · 중복 없음)
 - versionName 3.5.19 / versionCode 80
 
 ## v3.5.21 변경 내용
 - 미디어 스캐너가 **폴더 이름으로 플래그를 다시 계산한 뒤에도 플래그를 다시 켠다**
-  - Ringtones 폴더 파일은 스캔 과정에서 `IS_MUSIC` 이 0 으로 바뀌어 음악 라이브러리에서 빠질 수 있다
+  - Ringtones 폴더 파일은 스캔 과정에서 `IS_MUSIC` 이 0 으로 바뀌어 사운드 선택기 ＋ 목록에서 빠질 수 있다
     → 스캔이 끝난 뒤 `IS_RINGTONE=1` + `IS_MUSIC=1` 을 다시 적용한다
-  → **설정 > 소리 및 진동 > 벨소리** 목록에 바로 표시 (기기에서 확인 완료)
-- **알려진 동작 (유지 결정)**: 사운드 선택기 ＋ 목록은 Music 폴더 파일만 보여 준다 →
-  Ringtones 폴더에 있는 벨소리 파일은 사운드 선택기에 나타나지 않는다.
-  앱이 벨소리를 직접 적용해 선택기를 열 필요가 없고, 두 목록 모두에 보이게 하려면
-  같은 파일을 두 폴더에 두어야 해 중복이 생기므로 **현재 동작 유지** (설정 목록 우선).
+  → 설정 벨소리 목록과 사운드 선택기 ＋ 목록 **양쪽** 에 그대로 표시
 - versionName 3.5.21 / versionCode 82
 
 ## v3.5.20 변경 내용

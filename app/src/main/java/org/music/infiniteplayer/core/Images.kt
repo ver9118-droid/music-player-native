@@ -64,9 +64,7 @@ object Images {
         }
     }
 
-    /**
-     * 메모리/디스크 캐시를 먼저 확인하고, 없으면 네트워크에서 가져온다.
-     */
+    /** 메모리/디스크 캐시를 먼저 확인하고, 없으면 네트워크에서 가져온다. */
     suspend fun load(url: String, maxPx: Int = 512): Bitmap? = withContext(Dispatchers.IO) {
         if (url.isBlank()) return@withContext null
         memory.get(url)?.let { return@withContext it }
@@ -82,39 +80,6 @@ object Images {
         decodeFile(cached, maxPx)?.let { bmp ->
             memory.put(url, bmp)
             bmp
-        }
-    }
-
-    /**
-     * 이미 캐시된 이미지만 가져온다 (네트워크 요청 없음).
-     *
-     * AVRCP 메타데이터는 메인 스레드에서 만들어야 하므로 여기서 블록하면
-     * 화면이 얼어붙는다. 없으면 null 을 돌려주고, 나중에 캐시가 채워진 뒤
-     * 메타데이터를 다시 보낸다 (onTrackChanged 의 carMetadataTrackId ).
-     */
-    fun cachedBitmap(url: String, maxPx: Int = 256): Bitmap? {
-        if (url.isBlank()) return null
-        memory.get(url)?.let { return it }
-        val file = thumbFile(url) ?: return null
-        if (!file.exists() || file.length() <= 512) return null
-        return decodeFile(file, maxPx)?.also { bmp -> memory.put(url, bmp) }
-    }
-
-    /**
-     * 캐시된 이미지 **바이트**를 그대로 읽는다 (디코딩 없음, 네트워크 없음).
-     *
-     * MediaSession 은 아트웍을 압축 이미지 바이트로 받으면 BitmapLoader 로
-     * 직접 비트맵을 만든다. 차량(AVRCP)은 URI 를 무시하는 헤드유닛이 많아서
-     * 바이트를 그대로 넘기는 편이 가장 안정적이다.
-     */
-    fun cachedBytes(url: String): ByteArray? {
-        if (url.isBlank() || !::thumbDir.isInitialized) return null
-        val file = thumbFile(url) ?: return null
-        if (!file.exists() || file.length() <= 512 || file.length() > 256 * 1024) return null
-        return try {
-            file.readBytes()
-        } catch (_: Exception) {
-            null
         }
     }
 

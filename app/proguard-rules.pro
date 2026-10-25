@@ -13,12 +13,5 @@
 -dontwarn kotlinx.coroutines.**
 -keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
 
-# ── kotlinx.coroutines 디스패처 ──────────────────────────────
-# R8 3.0+ 는 META-INF/services 의 ServiceLoader 항목을 자동 보존하지만,
-# MainDispatcherFactory 가 빠지면 Dispatchers.Main 이 깨진다 → 명시적으로 남긴다.
--keep class kotlinx.coroutines.internal.MainDispatcherFactory { *; }
--keep class kotlinx.coroutines.android.AndroidDispatcherFactory { *; }
--keep class kotlinx.coroutines.android.AndroidExceptionPreHandler { *; }
-
 # ── org.json 은 안드로이드 기본 제공 (조용히 무시) ────────────────
 -dontwarn org.json.**
