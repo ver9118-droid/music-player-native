@@ -2,6 +2,7 @@
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
@@ -1478,13 +1479,13 @@ class PlaybackService : MediaSessionService() {
             packageManager.getLaunchIntentForPackage("com.samsung.android.app.soundpicker")
         }.getOrNull()?.let { candidates += it }
         // 2) 사운드 선택기로 지정한 벨소리 선택 화면
-        candidates += Intent(Intent.ACTION_RINGTONE_PICKER).apply {
+        candidates += Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
             setPackage("com.samsung.android.app.soundpicker")
-            if (saved != null) putExtra(Intent.EXTRA_RINGTONE_EXISTING_URI, saved)
+            if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
         }
         // 3) 일반 벨소리 선택 화면 (저장한 곡이 목록에 그대로 보인다)
-        candidates += Intent(Intent.ACTION_RINGTONE_PICKER).apply {
-            if (saved != null) putExtra(Intent.EXTRA_RINGTONE_EXISTING_URI, saved)
+        candidates += Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+            if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
         }
 
         val target = candidates.firstOrNull {
