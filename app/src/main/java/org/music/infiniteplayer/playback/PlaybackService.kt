@@ -124,9 +124,6 @@ class PlaybackService : MediaSessionService() {
     /** 차량 외부 디스플레이 영상 출력 (블루투스 AVRCP 는 메타데이터만 보낼 수 있다) */
     private var carDisplay: CarDisplay? = null
 
-    /** 마지막으로 벨소리를 만든 구간 (진단 행에 표시) */
-    private var lastHighlightInfo = ""
-
     // ── 생애주기 ───────────────────────────────────────────────
     override fun onCreate() {
         super.onCreate()
@@ -972,7 +969,6 @@ class PlaybackService : MediaSessionService() {
                     queueInfo = queue,
                     selfTest = selfTestText,
                     carDisplay = carDisplay?.info() ?: "",
-                    highlight = lastHighlightInfo,
                 )
             )
         }
@@ -1461,140 +1457,6 @@ class PlaybackService : MediaSessionService() {
             publish()
         }
     }
-
-    /**
-     * 현재 곡을 벨소리로 저장하고, 바로 기본 벨소리로 적용한다.
-     *
-     *  1) AAC(m4a) 스트림을 내려받는다 (다운로드 버튼과 같은 경로)
-     *  2) 갤럭시처럼 **하이라이트 구간을 앱이 직접 찾아** 그 부분만 잘라낸다
-     *     (삼성은 하이라이트를 자기 데이터베이스에 저장하고 밖으로 바꿔 주는 API 가 없다
-     *      → 구간을 파일 자체에 넣으면 사운드 선택기를 열지 않아도 그대로 재생된다)
-     *  3) MediaStore 에 "곡명 (벨소리).m4a" 로 저장 (이미 있는 행은 재사용)
-     *  4) RingtoneSetter 로 시스템 기본 벨소리에 바로 설정한다
-     *
-     * 분석이나 잘라내기가 실패하면 곡 전체를 그대로 저장한다.
-     *
-     * "시스템 설정에 쓰기" 권한이 없으면 권한 화면을 열고 토스트로 안내한다.
-     */
-    fun setAsRingtone() {
-        val entry = currentEntry
-        if (entry == null) {
-            toast("재생 중인 곡이 없습니다")
-            return
-        }
-        if (!org.music.infiniteplayer.core.RingtoneSetter.canWriteSettings(this)) {
-            toast("벨소리 권한이 없습니다 · 시스템 설정 권한을 허용해 주세요")
-            org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this)
-            return
-        }
-        scope.launch {
-            val src = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
-            downloadProgress = 0
-            setManualStatus("벨소리 저장 중...")
-
-            var audio = resolveForFile(entry)
-            if (audio == null) {
-                errorText = "스트림 주소를 얻지 못했습니다"
-                clearManualStatus()
-                toast("벨소리 실패: 스트림 주소를 얻지 못했습니다")
-                publish()
-                return@launch
-            }
-            var res = org.music.infiniteplayer.core.Downloader.download(audio.url, src) { percent ->
-                downloadProgress = percent
-                publish()
-            }
-            if (!res.ok) {
-                entry.audio = null
-                entry.job = null
-                audio = resolveEntry(entry, prefer = listOf(140, 139), useCache = false)
-                if (audio != null) {
-                    res = org.music.infiniteplayer.core.Downloader.download(audio.url, src) { percent ->
-                        downloadProgress = percent
-                        publish()
-                    }
-                }
-            }
-            downloadProgress = -1
-            val useAudio = audio
-            if (!res.ok || useAudio == null) {
-                errorText = "벨소리 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
-                clearManualStatus()
-                toast("벨소리 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
-                publish()
-                return@launch
-            }
-
-            // 2) 갤럭시처럼 하이라이트 구간을 앱이 찾아 그 부분만 잘라낸다.
-            //    (삼성은 하이라이트를 자기 DB 에 저장하고 밖으로 바꿔 주는 API 가 없다
-            //     → 구간을 파일 자체에 넣으면 사운드 선택기를 열지 않아도 그대로 울린다)
-            val fade = org.music.infiniteplayer.core.Prefs.ringtoneFade
-            var clip = src
-            var mime = useAudio.mimeType
-            var cutInfo = "하이라이트 못 찾음 · 곡 전체"
-
-            val w = org.music.infiniteplayer.core.Highlight.analyze(src)
-            if (w != null) {
-                // 페이드 인/아웃은 **파일 안에** 들어 있어야 한다 — 벨소리는 시스템이 재생하므로
-                // 앱이 음량을 조절할 수 없다. 그래서 페이드를 켠 경우에만 PCM 으로 디코딩해
-                // 게인 램프를 입히고 AAC 로 재인코딩한다 (페이드가 0 이면 샘플 그대로 복사).
-                val cut = File(cacheDir, "ringtone_cut.m4a")
-                val r = org.music.infiniteplayer.core.Highlight.render(
-                    src, cut, w, fade.toDouble(), fade.toDouble(),
-                )
-                if (r.ok) {
-                    clip = cut
-                    mime = r.mimeType
-                    val how = if (r.reencoded) "재인코딩" else "샘플 복사"
-                    cutInfo = "${w.label()} · $how"
-                } else {
-                    cutInfo = "${w.label()} · 쓰기 실패 → 곡 전체"
-                }
-            }
-
-            val ext = org.music.infiniteplayer.core.MediaSaver.extensionFor(mime)
-            val title = org.music.infiniteplayer.core.MediaSaver.safeName(
-                entry.track.title.ifBlank { "곡명" },
-            )
-            // 파일명은 곡명을 앞으로 (사운드 선택기 ＋ 목록에서 곡 이름으로 찾을 수 있게)
-            val name = "$title (벨소리).$ext"
-
-            val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
-                this@PlaybackService, clip, name, mime,
-            )
-            if (saved.uri == null) {
-                errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
-                clearManualStatus()
-                toast("벨소리 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
-                publish()
-                return@launch
-            }
-
-            // 이미 같은 파일이 기본 벨소리로 걸려 있으면 다시 설정하지 않는다.
-            // → 같은 곡인지 는 URI/파일 경로 + 파일명 두 가지로 비교한다
-            //   (이전 버전이 만들어 둔 음악 폴더 사본과 루트 Ringtones 는 URI 가 달라서
-            //    파일명으로 한 번 더 비교해야 같은 곡을 다시 설정하지 않는다)
-            val setter = org.music.infiniteplayer.core.RingtoneSetter
-            val alreadySet = setter.isSameRingtone(
-                this@PlaybackService, setter.currentRingtoneUri(this@PlaybackService), saved.uri,
-            ) || setter.currentRingtoneFileName(this@PlaybackService) ==
-                name.substringBeforeLast('.').lowercase()
-            val applied = alreadySet || setter.setRingtone(this@PlaybackService, saved.uri)
-            errorText = ""
-            val fadeText = if (fade > 0f) " · 페이드 ${fade}초" else ""
-            lastHighlightInfo = "$cutInfo$fadeText"
-            if (applied) {
-                setManualStatus("벨소리 적용 완료")
-                toast("벨소리 적용 완료 · $name · $cutInfo$fadeText")
-            } else {
-                setManualStatus("벨소리 저장 완료 (권한 필요)")
-                toast("벨소리 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")
-                org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this@PlaybackService)
-            }
-            publish()
-        }
-    }
-
 
     /** 파일명 (확장자는 실제 포맷에 맞춘다) */
     private fun safeFileName(track: Track, mimeType: String): String {

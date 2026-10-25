@@ -52,7 +52,6 @@ fun RootScreen() {
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var quality by remember { mutableStateOf(Prefs.quality) }
-    var ringtoneFade by remember { mutableStateOf(Prefs.ringtoneFade) }
     var carVideo by remember { mutableStateOf(Prefs.carVideo) }
     var favorites by remember { mutableStateOf(loadFavorites()) }
     var crashLog by remember { mutableStateOf(org.music.infiniteplayer.core.CrashLog.read()) }
@@ -109,7 +108,7 @@ fun RootScreen() {
 
     BackHandler(enabled = page != PAGE_HOME) { page = PAGE_HOME }
 
-    // 서비스에서 온 알림(다운로드/벨소리 결과)을 토스트로 표시
+    // 서비스에서 온 알림(다운로드 결과)을 토스트로 표시
     val toastContext = LocalContext.current
     LaunchedEffect(state.toastId) {
         if (state.toastId > 0L && state.toast.isNotBlank()) {
@@ -184,7 +183,6 @@ fun RootScreen() {
                 },
                 onRetry = { PlayerBus.post { it.retryCurrent() } },
                 onDownload = { PlayerBus.post { it.downloadToDevice() } },
-                onRingtone = { PlayerBus.post { it.setAsRingtone() } },
                 onRaiseVolume = { PlayerBus.post { it.raiseSystemVolume() } },
                 onBack = { page = PAGE_HOME },
                 onTogglePlay = { PlayerBus.post { it.toggle() } },
@@ -215,11 +213,6 @@ fun RootScreen() {
                 onMelonMv = { b ->
                     mvEnabled = b
                     Prefs.melonMvEnabled = b
-                },
-                ringtoneFade = ringtoneFade,
-                onRingtoneFade = { f ->
-                    ringtoneFade = f
-                    Prefs.ringtoneFade = f
                 },
                 carVideo = carVideo,
                 onCarVideo = { b ->

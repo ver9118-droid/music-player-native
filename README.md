@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `app-release-v3.5.23.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> `app-release-v3.5.24.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -57,6 +57,31 @@
 - **한국대중음악 장르 8종** (유튜브 검색)
 - 재생은 유튜브 InnerTube API 로 직접 스트림 URL 을 받아 ExoPlayer 가 재생
   (별도 다운로드/변환 불필요 → 준비 시간 1~2초)
+
+## v3.5.24 변경 내용
+
+### 벨소리 기능 전체 제거 (페이드 인/아웃 포함)
+
+요청에 따라 벨소리 기능을 앱에서 완전히 뗐습니다. 이 버전부터 벨소리 관련 코드·권한·설정 항목이 없습니다.
+
+- 삭제한 파일
+  - `core/Highlight.kt` (하이라이트 구간 분석·잘라내기·페이드 인코딩)
+  - `core/RingtoneSetter.kt` (시스템 기본 벨소리 설정)
+- 제거한 항목
+  - 재생 화면의 **벨소리 칩** (NowPlayingScreen / PlayerPanel / ActionChips)
+  - 설정의 **벨소리 페이드 인/아웃** 행과 설명 문구, `Prefs.ringtoneFade` (`ringtone_fade` 키)
+  - 진단의 **"벨소리 구간"** 행 (`Diagnostics.highlight`)
+  - `PlaybackService.setAsRingtone()`, `lastHighlightInfo`
+  - `AndroidManifest.xml` 의 `WRITE_SETTINGS` 권한 (민감 권한 → 설치 시 경고가 줄어든다)
+    + 불필요해진 `xmlns:tools` 선언
+  - `MediaSaver` 의 벨소리 전용 경로 (`saveAsRingtone`, `keepSingleCopy`, `overwrite`,
+    `findExisting`, `moveToRingtoneFolder`, `RING_DIR`/`RING_LEGACY_DIR`, `isRingtone` 파라미터)
+- **다운로드 기능은 그대로 유지**: Music 폴더(`Music/무한 음악 플레이어`) 저장 경로만 남았다.
+- APK: **2,320,826 B** (이전 2,323,062 B → 제거한 코드만큼 줄어듦)
+- versionName 3.5.24 / versionCode 85
+
+벨소리 관련 설계(하이라이트 가중치, 페이드 인코딩)는 git 기록 `f0caefc` 에 남아 있어
+다시 필요해지면 그 커밋에서 되살릴 수 있다.
 
 ## v3.5.23 변경 내용
 
