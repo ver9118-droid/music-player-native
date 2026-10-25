@@ -24,21 +24,24 @@ object MediaSaver {
     private const val MUSIC_DIR = "Music/무한 음악 플레이어"
 
     /**
-     * 벨소리 저장 폴더 (음악 폴더 `Music/` 바로 아래).
+     * 이전 버전이 벨소리 사본을 넣어 둔 음악 폴더.
      *
-     * 삼성 **사운드 선택기(＋ 목록)** 는 음악 폴더 계열 파일만 모아 보여주기 때문에
-     * 저장소 루트의 `Ringtones` 에 넣으면 목록에 아예 안 뜬다.
-     * (Music 바로 아래 + `IS_MUSIC=1` 로 "모두/음악/폴더" 목록 어디에서도 보이게 한다)
+     * 여기 있는 파일은 **새로 만들지 않는다** — 이미 있으면 루트 `Ringtones` 로
+     * **행만 옮긴다** (MediaStore ID 가 유지되어 하이라이트 구간이 보존된다).
      */
     private const val RING_DIR = "Music"
 
     /**
-     * **설정 > 소리 및 진동 > 벨소리** 목록이 읽는 폴더 = 저장소 루트 `Ringtones`.
+     * 벨소리는 **저장소 루트 `Ringtones` 에 한 개만** 저장한다.
      *
-     * 두 목록이 폴더를 다르게 읽는다:
-     *  - 사운드 선택기(＋ 목록) → 음악 폴더(`RING_DIR`)
-     *  - 설정 벨소리 목록     → 루트 `Ringtones` (`RING_ROOT_DIR`)
-     * 그래서 벨소리는 **두 곳에 같은 파일을 넣는다** (이중 저장).
+     * (이전 버전은 사운드 선택기 ＋ 목록과 설정 벨소리 목록이 읽는 폴더가 달라서
+     *  같은 파일을 두 곳에 넣었다 → 사운드 선택기에 같은 곡이 **두 개**로 보였다.
+     *  설정 벨소리 목록은 루트 `Ringtones` 를 읽고, 사운드 선택기는 두 폴더를 모두
+     *  보여주므로, 루트 한 곳에 `IS_RINGTONE=1` + `IS_MUSIC=1` 로 넣으면 양쪽 모두 보인다.)
+     *
+     * 한 개만 두는 또 다른 이유: **하이라이트 구간 MediaStore ID(URI) 에 저장**된다.
+     * 파일이 두 개면 선택기에서 하이라이트를 잡은 쪽과 실제로 울리는 쪽이 달라져
+     * 벨소리가 처음부터 재생된다.
      */
     private const val RING_ROOT_DIR = "Ringtones"
 
@@ -93,7 +96,19 @@ object MediaSaver {
         }
     }
 
-    /** 벨소리 목록에 보이게 저장 — **두 폴더에 이중 저장** 후 루트 `Ringtones` URI 반환 */
+    /**
+     * 벨소리로 저장 — **저장소 루트 `Ringtones` 에 한 개만** 만든다.
+     *
+     * 순서:
+     *  ① 루트 `Ringtones` 에 같은 이름이 이미 있으면 → 그 URI 재사용 (ID 유지 → 하이라이트 유지)
+     *  ② 음악 폴더에 **우리 앱이 만든 사본**(`곡명 (벨소리).ext`) 이 있으면 →
+     *     파일을 새로 만들지 않고 **그 행을 루트 `Ringtones` 로 옮긴다**
+     *     (ID 가 그대로 유지되므로 사운드 선택기의 하이라이트 구간이 살아 있고,
+     *      목록에 같은 곡이 두 개로 보이지 않는다)
+     *  ③ 아무것도 없으면 새로 삽입
+     *
+     * 사용자가 직접 넣어 둔 파일은 옮기거나 지우지 않는다 (앱이 만든 이름만 처리).
+     */
     suspend fun saveAsRingtone(
         context: Context,
         file: File,
@@ -103,14 +118,18 @@ object MediaSaver {
         val mime = plainMime(mimeType)
         val name = safeName(displayName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // ① 사운드 선택기(＋ 목록) 가 모아 보여주는 음악 폴더
-            val music = insert(context, file, name, mime, RING_DIR, isRingtone = true)
-            // ② 설정 > 벨소리 목록이 읽는 저장소 루트 Ringtones (실패해도 ① 은 유지)
-            val root = insert(context, file, name, mime, RING_ROOT_DIR, isRingtone = true)
-            // 둘 중 하나라도 성공하면 성공으로 친다 (설정 목록용 URI 를 우선 반환)
-            if (root.uri != null) root else music
+            val resolver = context.contentResolver
+            findExisting(resolver, name, RING_ROOT_DIR)?.let { return@withContext SaveResult(it, "") }
+
+            // 이전 버전이 음악 폴더에 만들어 둔 사본 → 행을 옮긴다 (새 사본 금지)
+            val old = findExisting(resolver, name, RING_DIR)
+            if (old != null && isAppCreated(name)) {
+                val moved = moveToRingtoneFolder(resolver, old)
+                if (moved != null) return@withContext SaveResult(moved, "")
+            }
+
+            insert(context, file, name, mime, RING_ROOT_DIR, isRingtone = true)
         } else {
-            copyLegacy(context, file, name, mime, Environment.DIRECTORY_MUSIC)
             copyLegacy(context, file, name, mime, Environment.DIRECTORY_RINGTONES)
         }
     }
@@ -118,21 +137,37 @@ object MediaSaver {
     /**
      * 사운드 선택기에서 고른 소리를 **저장소 루트 `Ringtones`** 에 저장한다.
      * (설정 > 소리 및 진동 > 벨소리 목록에 뜨게 함)
+     *
+     * 이미 같은 이름 파일이 있으면 재사용/이동만 한다 → `saveAsRingtone` 과 같은 규칙.
      */
     suspend fun saveToRingtoneFolder(
         context: Context,
         file: File,
         displayName: String,
         mimeType: String,
-    ): SaveResult = withContext(Dispatchers.IO) {
-        val mime = plainMime(mimeType)
+    ): SaveResult = saveAsRingtone(context, file, displayName, mimeType)
+
+    /**
+     * 같은 이름 파일을 찾는다 — **저장소 루트 `Ringtones` 우선**, 그 다음 음악 폴더.
+     *
+     * (이전 버전이 두 곳에 사본을 만들어 둔 파일을 "같은 곡" 으로 인식하게 한다)
+     */
+    fun findExistingByName(context: Context, displayName: String): Uri? {
+        val resolver = context.contentResolver
         val name = safeName(displayName)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            insert(context, file, name, mime, RING_ROOT_DIR, isRingtone = true)
-        } else {
-            copyLegacy(context, file, name, mime, Environment.DIRECTORY_RINGTONES)
-        }
+        return findExisting(resolver, name, RING_ROOT_DIR) ?: findExisting(resolver, name, RING_DIR)
     }
+
+    /**
+     * MediaStore **행만** 루트 `Ringtones` 로 옮긴다 (파일을 복사하지 않는다).
+     *
+     * 행 ID 가 유지되므로 사운드 선택기가 그 ID 에 붙여 둔 **하이라이트 구간이 사라지지 않는다.**
+     */
+    fun moveToRingtoneFolder(context: Context, uri: Uri): Uri? =
+        moveToRingtoneFolder(context.contentResolver, uri)
+
+    /** 앱이 만든 벨소리 파일명인지 (`곡명 (벨소리).ext`) — 사용자 파일은 건드리지 않는다 */
+    fun isAppCreated(displayName: String): Boolean = displayName.contains("(벨소리)")
 
     private fun insert(
         context: Context,
@@ -207,7 +242,8 @@ object MediaSaver {
                 "${MediaStore.Audio.Media.DISPLAY_NAME}=? AND (" +
                     "${MediaStore.Audio.Media.RELATIVE_PATH}=? OR " +
                     "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?)",
-                arrayOf(displayName, "$relativePath/", "$relativePath/%"),
+                // RELATIVE_PATH 는 끝 슬래시 없이 저장되는 경우가 있다 (Ringtones, Music)
+                arrayOf(displayName, relativePath, "$relativePath/%"),
                 null,
             )?.use { c ->
                 if (c.moveToFirst()) {
@@ -221,6 +257,24 @@ object MediaSaver {
             }
         } catch (_: Exception) {
             // 조회 실패는 저장을 막지 않는다 (그때만 새로 만든다)
+            null
+        }
+    }
+
+    private fun moveToRingtoneFolder(
+        resolver: android.content.ContentResolver,
+        uri: Uri,
+    ): Uri? {
+        return try {
+            val values = ContentValues().apply {
+                put(MediaStore.Audio.Media.RELATIVE_PATH, RING_ROOT_DIR)
+                // 벨소리 + 음악 flags: 설정 벨소리 목록과 사운드 선택기 양쪽에서 보이게
+                put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+                put(MediaStore.Audio.Media.IS_MUSIC, 1)
+            }
+            if (resolver.update(uri, values, null, null) > 0) uri else null
+        } catch (_: Exception) {
+            // 앱이 소유하지 않은 행은 옮길 수 없다 → 원본 URI 를 그대로 쓴다
             null
         }
     }

@@ -75,7 +75,7 @@ class PlaybackService : MediaSessionService() {
 
     private val entries = ArrayList<Entry>()
 
-    /** 해석해 둔 스트림 캐시 (曲目 id → 스트림) */
+    /** 해석해 둔 스트림 캐시 (곡 id → 스트림) */
     private val audioCache = HashMap<String, ResolvedAudio>()
 
     /** 재생목록 세대 번호. 바뀌면 진행 중인 미리 준비를 중단한다. */
@@ -1449,7 +1449,8 @@ class PlaybackService : MediaSessionService() {
             // 이미 같은 파일이 기본 벨소리로 걸려 있으면 다시 설정하지 않는다.
             // (재설정하면 사운드 선택기가 저장해 둔 "선택한 하이라이트" 가 풀린다)
             // → 같은 곡인지 는 URI/파일 경로 + 파일명 두 가지로 비교한다
-            //   (음악 폴더 사본과 루트 Ringtones 사본은 URI 가 다르지만 같은 곡이다)
+            //   (이전 버전이 만들어 둔 음악 폴더 사본과 루트 Ringtones 는 URI 가 달라서
+            //    파일명으로 한 번 더 비교해야 같은 곡을 다시 설정하지 않는다)
             val setter = org.music.infiniteplayer.core.RingtoneSetter
             val alreadySet = setter.isSameRingtone(
                 this@PlaybackService, setter.currentRingtoneUri(this@PlaybackService), saved.uri,

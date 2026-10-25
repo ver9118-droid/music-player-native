@@ -18,7 +18,7 @@ data class PlaybackTick(
 /**
  * 진단 정보.
  *
- * AudioManager 를 호출해야 하므로(昂贵) 필요할 때만 갱신한다.
+ * AudioManager 를 호출해야 하므로(비싼 호출) 필요할 때만 갱신한다.
  */
 data class Diagnostics(
     val playerState: String = "IDLE",
@@ -33,7 +33,7 @@ data class Diagnostics(
     val selfTest: String = "",
 )
 
-/** UI 가 보는 재생 상태 (曲目 정보/설정 등 자주 안 바뀌는 것들). */
+/** UI 가 보는 재생 상태 (곡 정보/설정 등 자주 안 바뀌는 것들). */
 data class PlayerState(
     val playing: Boolean = false,
     val buffering: Boolean = false,
