@@ -162,6 +162,8 @@ object Highlight {
         var decoder: MediaCodec? = null
         var encoder: MediaCodec? = null
         var muxer: MediaMuxer? = null
+        // 실패 지점을 토스트에 표시한다. catch 에서도 읽어야 하므로 try 밖에서 선언한다.
+        var stage = "준비"
         try {
             extractor.setDataSource(input.absolutePath)
             val trackIndex = audioTrack(extractor)
@@ -198,6 +200,7 @@ object Highlight {
             while (guard++ < 200_000) {
                 // 1) 디코더 입력 — 구간 안의 샘플만 넣는다
                 if (!decoderInputDone) {
+                    stage = "디코더 입력"
                     val inIndex = decoder.dequeueInputBuffer(10_000)
                     if (inIndex >= 0) {
                         val buffer = decoder.getInputBuffer(inIndex)
@@ -260,9 +263,11 @@ object Highlight {
                             gainInfo.offset = 0
                             gainInfo.size = valid
                             gainInfo.presentationTimeUs = info.presentationTimeUs
+                            stage = "게인 램프"
                             applyGain(work, gainInfo, startUs, endUs, inSec, outSec)
 
                             // 인코더 시간 기준은 파일 시작(0) 이다
+                            stage = "인코더 입력"
                             work.position(0)
                             val basePts = info.presentationTimeUs - startUs
                             var left = valid
@@ -308,6 +313,7 @@ object Highlight {
                 val mx = muxer
 
                 // 3) 인코더 출력 → muxer
+                stage = "인코더 출력/muxer"
                 val encOut = enc.dequeueOutputBuffer(encInfo, 10_000)
                 if (encOut >= 0) {
                     if (encInfo.size > 0) {
@@ -351,7 +357,7 @@ object Highlight {
         } catch (e: Exception) {
             // 앱 안에서도 원인을 볼 수 있게 남긴다 (토스트는 길면 잘린다)
             android.util.Log.w("Highlight", "페이드 인코딩 실패", e)
-            return e.message ?: e.javaClass.simpleName
+            return "$stage: ${e.message ?: e.javaClass.simpleName}"
         } finally {
             try {
                 muxer?.release()
@@ -427,6 +433,12 @@ object Highlight {
     /**
      * PCM 샘플에 게인 램프를 입힌다 (라인 램프).
      * MediaCodec 의 PCM 은 16bit little-endian 이므로 byte order 를 바꿔 읽는다.
+     *
+     * **주의**: `buffer.short` 은 읽기만 하고 position 을 2 앞으로 밀고,
+     * `buffer.putShort` 은 그 **뒤**에 쓴다. 즉 샘플 하나당 4 바이트를 소비한다
+     * (읽기 2 + 쓰기 2). 버퍼 limit 이 유효 데이터 크기(info.size) 이면
+     * limit/4 번째 샘플에서 `BufferUnderflowException` 이 난다.
+     * → position 을 쓰지 않고 **절대 인덱스**(getShort/putShort) 로 같은 위치를 읽기와 쓰기에 쓴다.
      */
     private fun applyGain(
         buffer: ByteBuffer,
@@ -444,19 +456,14 @@ object Highlight {
         val gain = gainIn * gainOut
         if (gain >= 0.9999) return
 
-        buffer.position(info.offset)
         buffer.order(ByteOrder.LITTLE_ENDIAN)
-        // 버퍼의 limit 을 넘기지 않는다 (BufferUnderflow 방지).
-        // info.size 가 홀수일 수 있으므로 읽을 수 있는 16bit 샘플 개수로 제한한다.
-        val readable = buffer.limit() - buffer.position()
-        val samples = min(info.size / 2, readable / 2)
-        if (samples <= 0) {
-            buffer.order(ByteOrder.BIG_ENDIAN)
-            return
-        }
+        val base = info.offset
+        // 절대 인덱스 읽기는 limit 을 넘길 수 있으므로 읽을 수 있는 샘플로 제한한다
+        val samples = min(info.size / 2, (buffer.limit() - base) / 2)
         for (i in 0 until samples) {
-            val v = (buffer.short * gain).toInt().coerceIn(-32768, 32767)
-            buffer.putShort(v.toShort())
+            val idx = base + i * 2
+            val v = (buffer.getShort(idx) * gain).toInt().coerceIn(-32768, 32767)
+            buffer.putShort(idx, v.toShort())
         }
         buffer.order(ByteOrder.BIG_ENDIAN)
     }

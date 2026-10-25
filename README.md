@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `app-release-v3.5.28.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> `app-release-v3.5.29.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -53,6 +53,15 @@
 - **한국대중음악 장르 8종** (유튜브 검색)
 - 재생은 유튜브 InnerTube API 로 직접 스트림 URL 을 받아 ExoPlayer 가 재생
   (별도 다운로드/변환 불필요 → 준비 시간 1~2초)
+
+## v3.5.29 변경 내용
+- **페이드 실패의 실제 원인 수정** — `applyGain` 의 버퍼 position 이중 진행
+  - `buffer.short` 은 읽기만 하고 position 을 2 앞으로 밀고, `buffer.putShort` 은 **그 뒤에** 쓴다.
+    샘플 하나당 4 바이트를 소비하므로 limit(info.size) 의 1/4 지점에서 `BufferUnderflowException` 났다.
+  - 이제 position 을 쓰지 않고 **절대 인덱스**(`getShort(idx)` / `putShort(idx, v)`) 로
+    같은 위치를 읽기와 쓰기에 모두 사용한다.
+  - 실패 지점을 토스트에 표시한다 (예: `게인 램프: BufferUnderflowException`).
+- versionName 3.5.29 / versionCode 90
 
 ## v3.5.28 변경 내용
 - **페이드 실패 원인 수정** — `BufferUnderflowException`
