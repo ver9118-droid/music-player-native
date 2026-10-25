@@ -148,12 +148,15 @@ object Highlight {
      *
      * 페이드가 꺼져 있으면(0 초) 음질 손실이 없는 샘플 복사 경로(cut)를 그대로 쓴다.
      * 실패하면 호출자가 곡 전체를 쓰는 쪽으로 fallback 한다.
+     *
+     * 반환: null = 성공, 그 외 **실패 이유**. 예외를 삼키면 어느 지점에서 실패했는지
+     * 알 수 없으므로 이유를 돌려준다 (호출자가 토스트에 표시한다).
      */
-    fun encodeWithFade(input: File, out: File, window: Window, fadeInSec: Double, fadeOutSec: Double): Boolean {
+    fun encodeWithFade(input: File, out: File, window: Window, fadeInSec: Double, fadeOutSec: Double): String? {
         // 페이드가 구간 절반보다 길면 램프가 겹치므로 절반으로 제한한다
         val inSec = fadeInSec.coerceIn(0.0, CLIP_SECONDS / 2.0)
         val outSec = fadeOutSec.coerceIn(0.0, CLIP_SECONDS / 2.0)
-        if (inSec <= 0.0 && outSec <= 0.0) return cut(input, out, window)
+        if (inSec <= 0.0 && outSec <= 0.0) return if (cut(input, out, window)) null else "샘플 복사 실패"
 
         val extractor = MediaExtractor()
         var decoder: MediaCodec? = null
@@ -162,21 +165,24 @@ object Highlight {
         try {
             extractor.setDataSource(input.absolutePath)
             val trackIndex = audioTrack(extractor)
-            if (trackIndex < 0) return false
+            if (trackIndex < 0) return "음성 트랙 없음"
             extractor.selectTrack(trackIndex)
 
             val inFormat = extractor.getTrackFormat(trackIndex)
-            val mime = inFormat.getString(MediaFormat.KEY_MIME) ?: return false
+            val mime = inFormat.getString(MediaFormat.KEY_MIME) ?: return "포맷 확인 실패"
 
             decoder = MediaCodec.createDecoderByType(mime)
             decoder.configure(inFormat, null, null, 0)
             decoder.start()
 
             // 구간 시작 직전 동기 지점으로 이동 (디코더는 sync 에서만 시작할 수 있다)
+            // seekTo 는 반환값이 없다 (void) → 이동 후 샘플이 없으면 실패로 본다
             extractor.seekTo(window.startSec * 1_000_000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-            val startUs = max(0L, extractor.getSampleTime())
+            val seekedUs = extractor.getSampleTime()
+            if (seekedUs < 0) return "구간 시작점으로 이동 실패"
+            val startUs = max(0L, seekedUs)
             val endUs = window.endSec * 1_000_000L
-            if (endUs <= startUs) return false
+            if (endUs <= startUs) return "구간이 파일 밖에 있다"
 
             val info = MediaCodec.BufferInfo()
             val encInfo = MediaCodec.BufferInfo()
@@ -186,6 +192,7 @@ object Highlight {
             var outTrack = -1
             var written = 0
             var guard = 0
+            var frameBytes = 2
 
             while (guard++ < 200_000) {
                 // 1) 디코더 입력 — 구간 안의 샘플만 넣는다
@@ -212,7 +219,12 @@ object Highlight {
                         if (pcm != null) {
                             if (encoder == null) {
                                 encoder = createEncoder(decoder.getOutputFormat())
-                                if (encoder == null) return false
+                                if (encoder == null) return "AAC 인코더 생성 실패"
+                                val pcmFormat = decoder.getOutputFormat()
+                                val channels = if (pcmFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
+                                    pcmFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                                else 2
+                                frameBytes = max(1, 2 * channels)
                                 muxer = MediaMuxer(
                                     out.absolutePath,
                                     MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
@@ -220,17 +232,29 @@ object Highlight {
                             }
                             applyGain(pcm, info, startUs, endUs, inSec, outSec)
 
-                            val encIn = encoder.dequeueInputBuffer(10_000)
-                            if (encIn >= 0) {
-                                val encBuffer = encoder.getInputBuffer(encIn)
-                                if (encBuffer != null) {
-                                    // 인코더 시간 기준은 파일 시작(0) 이다
-                                    val pts = info.presentationTimeUs - startUs
-                                    pcm.position(info.offset)
-                                    encBuffer.clear()
-                                    encBuffer.put(pcm)
-                                    encoder.queueInputBuffer(encIn, 0, info.size, pts, 0)
-                                }
+                            // 버퍼의 limit 은 캐패시티까지 있다 — info.size 만큼만 잘라야 한다.
+                            // 그대로 put 하면 디코더 출력 버퍼가 인코더 입력 버퍼보다 클 때
+                            // BufferOverflowException (또는 queueInputBuffer 의 size 오류) 으로 실패한다.
+                            pcm.position(info.offset)
+                            pcm.limit(info.offset + info.size)
+
+                            // 인코더 시간 기준은 파일 시작(0) 이다
+                            val basePts = info.presentationTimeUs - startUs
+                            var left = info.size
+                            while (left > 0) {
+                                val encIn = encoder.dequeueInputBuffer(10_000)
+                                if (encIn < 0) break
+                                val encBuffer = encoder.getInputBuffer(encIn) ?: break
+                                encBuffer.clear()
+                                val chunk = min(left, encBuffer.remaining())
+                                if (chunk <= 0) break
+                                val limit = pcm.limit()
+                                pcm.limit(pcm.position() + chunk)
+                                encBuffer.put(pcm)
+                                pcm.limit(limit)
+                                val pts = basePts + (info.size - left) * 1_000_000L / frameBytes
+                                encoder.queueInputBuffer(encIn, 0, chunk, pts, 0)
+                                left -= chunk
                             }
                         }
                     }
@@ -261,16 +285,26 @@ object Highlight {
                 val encOut = enc.dequeueOutputBuffer(encInfo, 10_000)
                 if (encOut >= 0) {
                     if (encInfo.size > 0) {
+                        val encBuffer = enc.getOutputBuffer(encOut)
                         if (outTrack < 0) {
-                            outTrack = mx.addTrack(enc.getOutputFormat())
+                            // MediaMuxer 는 csd-0 없이 AAC 트랙을 받아들이지 않는다.
+                            // INFO_OUTPUT_FORMAT_CHANGED 를 먼저 받지 못하면 포맷에 csd-0 가 없다
+                            // → 첫 codec-config buffer 에서 채운 뒤 addTrack 한다.
+                            val fmt = enc.getOutputFormat()
+                            if (!fmt.containsKey("csd-0") && encBuffer != null) {
+                                val csd = ByteArray(encInfo.size)
+                                val copy = encBuffer.duplicate()
+                                copy.position(encInfo.offset)
+                                copy.limit(encInfo.offset + encInfo.size)
+                                copy.get(csd)
+                                fmt.setByteBuffer("csd-0", ByteBuffer.wrap(csd))
+                            }
+                            outTrack = mx.addTrack(fmt)
                             mx.start()
                         }
-                        if (encInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
-                            val encBuffer = enc.getOutputBuffer(encOut)
-                            if (encBuffer != null) {
-                                mx.writeSampleData(outTrack, encBuffer, encInfo)
-                                written++
-                            }
+                        if (encInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 && encBuffer != null) {
+                            mx.writeSampleData(outTrack, encBuffer, encInfo)
+                            written++
                         }
                     }
                     enc.releaseOutputBuffer(encOut, false)
@@ -287,9 +321,9 @@ object Highlight {
             }
 
             if (outTrack >= 0 && muxer != null) muxer.stop()
-            return written > 0 && out.length() > 0
-        } catch (_: Exception) {
-            return false
+            return if (written > 0 && out.length() > 0) null else "인코딩 출력 없음"
+        } catch (e: Exception) {
+            return e.message ?: e.javaClass.simpleName
         } finally {
             try {
                 muxer?.release()
@@ -342,13 +376,18 @@ object Highlight {
                 pcmFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             else 2
 
+            val codec = MediaCodec.createEncoderByType("audio/mp4a-latm")
+
             val format = MediaFormat.createAudioFormat("audio/mp4a-latm", rate, channels)
             format.setInteger(MediaFormat.KEY_BIT_RATE, 128_000)
-            // AAC-LC (MediaCodecInfo.AACProfile.AACProfileLC = 2). SDK 에 공개 상수가
-            // 없으므로 값으로 적는다 — 기본값도 AAC-LC 이지만 명시적으로 지정한다.
-            format.setInteger(MediaFormat.KEY_AAC_PROFILE, 2)
+            // AAC-LC (CodecProfileLevel.AACObjectLC = 2). SDK 에 공개 상수가 없으므로 값으로 적는다.
+            // 단, **그 인코더가 LC 프로파일을 지원하는 경우에만** 지정한다 — 지원 목록에 없는
+            // 프로파일을 넣으면 configure 가 예외를 내어 실패한다. 지원하지 않으면 기본값(LC) 을 쓴다.
+            // (capabilities 는 MediaCodecInfo 에 있다)
+            val caps = codec.getCodecInfo().getCapabilitiesForType("audio/mp4a-latm")
+            val supportsLc = caps.profileLevels.any { level -> level.profile == 2 }
+            if (supportsLc) format.setInteger(MediaFormat.KEY_AAC_PROFILE, 2)
 
-            val codec = MediaCodec.createEncoderByType("audio/mp4a-latm")
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
             return codec

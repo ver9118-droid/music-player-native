@@ -1434,6 +1434,7 @@ class PlaybackService : MediaSessionService() {
             var clip = src
             var window: org.music.infiniteplayer.core.Highlight.Window? = null
             var mime = useAudio.mimeType
+            var fadeFail = ""
             val w = org.music.infiniteplayer.core.Highlight.analyze(src)
             if (w != null) {
                 // 페이드 인/아웃은 **파일 안에** 들어 있어야 한다 — 벨소리는 시스템이 재생하므로
@@ -1442,18 +1443,32 @@ class PlaybackService : MediaSessionService() {
                 val outExt = if (fade > 0f) "m4a"
                 else org.music.infiniteplayer.core.MediaSaver.extensionFor(mime)
                 val cut = File(cacheDir, "ringtone_cut.${outExt}")
+                var fail = ""
                 val ok = if (fade > 0f) {
-                    val encoded = org.music.infiniteplayer.core.Highlight.encodeWithFade(
+                    // null = 성공, 그 외 실패 이유
+                    val reason = org.music.infiniteplayer.core.Highlight.encodeWithFade(
                         src, cut, w, fade.toDouble(), fade.toDouble(),
                     )
-                    if (encoded) mime = "audio/mp4a-latm"
-                    encoded
+                    if (reason == null) {
+                        mime = "audio/mp4a-latm"
+                        true
+                    } else {
+                        fail = reason
+                        false
+                    }
                 } else {
-                    org.music.infiniteplayer.core.Highlight.cut(src, cut, w)
+                    if (org.music.infiniteplayer.core.Highlight.cut(src, cut, w)) true
+                    else {
+                        fail = "샘플 복사 실패"
+                        false
+                    }
                 }
                 if (ok) {
                     clip = cut
                     window = w
+                } else {
+                    // 페이드 인코딩 실패 → 곡 전체로 fallback (실패 이유를 토스트에 표시한다)
+                    fadeFail = fail
                 }
             }
 
@@ -1491,6 +1506,9 @@ class PlaybackService : MediaSessionService() {
                 val where = if (window != null) {
                     val f = if (fade > 0f) " · 페이드 ${fade}초" else ""
                     " · 하이라이트 ${window.label()}$f"
+                } else if (fadeFail.isNotBlank()) {
+                    // 하이라이트는 찾았지만 페이드 인코딩이 실패했다 → 이유를 표시한다
+                    " · 곡 전체 (페이드 실패: $fadeFail)"
                 } else " · 곡 전체"
                 toast("벨소리 적용 완료 · $name$where")
             } else {

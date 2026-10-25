@@ -124,8 +124,12 @@ object MediaSaver {
                 // 앱이 만든 파일 → 이미 있으면 재사용/정리 (사용자 파일과 구분)
                 val kept = keepSingleCopy(context, name)
                 if (kept != null) {
-                    overwrite(context, resolver, kept, file, mime, name)
-                    return@withContext SaveResult(kept, "")
+                    if (overwrite(context, resolver, kept, file, mime, name)) {
+                        return@withContext SaveResult(kept, "")
+                    }
+                    // 쓰기 실패 → 그 행은 이전 내용(곡 전체) 을 그대로 유지한다.
+                    // 실패한 행을 돌려주면 파일명만 바뀐 채 옛 파일이 남는다 → 새로 삽입한다.
+                    return@withContext insert(context, file, name, mime, RING_DIR, isRingtone = true)
                 }
             } else {
                 // 사용자 파일: 그 자리 그대로 사용한다 (옮기거나 지우지 않는다)
