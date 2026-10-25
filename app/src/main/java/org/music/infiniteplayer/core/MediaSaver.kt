@@ -213,7 +213,20 @@ object MediaSaver {
                 if (index >= 0 && c.moveToFirst()) c.getString(index) else null
             }
             if (path != null) {
-                MediaScannerConnection.scanFile(context, arrayOf(path), arrayOf(mimeType), null)
+                // 스캐너는 폴더 이름으로 플래그를 다시 계산한다 (Ringtones → is_music 가 0 이 될 수 있다)
+                // → 스캔이 끝난 뒤 플래그를 다시 켠다 (설정 벨소리 목록 + 사운드 선택기 ＋ 목록 양쪽 유지)
+                MediaScannerConnection.scanFile(context, arrayOf(path), arrayOf(mimeType)) { _, scanned ->
+                    if (scanned == null) return@scanFile
+                    try {
+                        val flags = ContentValues().apply {
+                            put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+                            put(MediaStore.Audio.Media.IS_MUSIC, 1)
+                        }
+                        resolver.update(moved, flags, null, null)
+                    } catch (_: Exception) {
+                        // 플래그 재적용 실패는 저장을 막지 않는다
+                    }
+                }
             }
         } catch (_: Exception) {
             // 스캔 실패는 저장을 막지 않는다
