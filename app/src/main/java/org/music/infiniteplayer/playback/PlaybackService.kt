@@ -1475,41 +1475,61 @@ class PlaybackService : MediaSessionService() {
 
         val candidates = mutableListOf<Intent>()
         // 1) 삼성 사운드 선택기 앱 직접 실행
-        runCatching {
+        try {
             packageManager.getLaunchIntentForPackage("com.samsung.android.app.soundpicker")
-        }.getOrNull()?.let { candidates += it }
+                ?.let { candidates.add(it) }
+        } catch (_: Exception) {
+            // 없으면 다음 후보로
+        }
         // 2) 사운드 선택기로 지정한 벨소리 선택 화면
-        candidates += Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-            setPackage("com.samsung.android.app.soundpicker")
-            if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
-        }
+        candidates.add(
+            Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                setPackage("com.samsung.android.app.soundpicker")
+                if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
+            },
+        )
         // 3) 일반 벨소리 선택 화면 (저장한 곡이 목록에 그대로 보인다)
-        candidates += Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-            if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
-        }
+        candidates.add(
+            Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
+            },
+        )
 
-        val target = candidates.firstOrNull { cand ->
-            runCatching { cand.resolve(packageManager) }.getOrNull() != null
-        } ?: return
-        val started = runCatching {
-            target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(target)
+        // 실제로 열 수 있는 첫 번째 후보만 사용한다
+        var target: Intent? = null
+        for (cand in candidates) {
+            val resolvable = try {
+                cand.resolve(packageManager) != null
+            } catch (_: Exception) {
+                false
+            }
+            if (resolvable) {
+                target = cand
+                break
+            }
+        }
+        val picked = target ?: return
+        val started = try {
+            picked.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(picked)
             true
-        }.getOrDefault(false)
+        } catch (_: Exception) {
+            false
+        }
         if (!started) return
 
-        // 선택기가 열린 뒤 안내가 보이도록 잠깐 늦춰서 시스템 토스트로 알려준다
+        // 선택기가 열리는 중 안내가 보이도록 시스템 토스트로 알려준다
         // (앱 안 토스트는 화면이 가려져 보이지 않으므로 시스템 토스트를 쓴다)
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            runCatching {
-                android.widget.Toast.makeText(
-                    this,
-                    "사운드 선택기에서 \"선택된 하이라이트만 재생\"을 켜고 같은 곡을 선택하면\n" +
-                        "하이라이트 구간이 자동으로 적용됩니다",
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
-            }
-        }, 500L)
+        try {
+            android.widget.Toast.makeText(
+                this,
+                "사운드 선택기에서 \"선택된 하이라이트만 재생\"을 켜고 같은 곡을 선택하면\n" +
+                    "하이라이트 구간이 자동으로 적용됩니다",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        } catch (_: Exception) {
+            // 안내 실패는 재생에 영향을 주지 않으므로 무시한다
+        }
     }
 
     /** 파일명 (확장자는 실제 포맷에 맞춘다) */
