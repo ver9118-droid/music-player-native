@@ -59,6 +59,15 @@
             </intent-filter>
         </activity>
 
+        <!-- 사운드 선택기 결과를 받아 실제로 벨소리로 적용하는 투명 창.
+             (＋ 목록 화면은 "결과를 호출자에게 돌려주는" 모드라서
+              결과를 안 받으면 완료를 눌러도 적용이 안 된다) -->
+        <activity
+            android:name=".ui.SoundPickerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.InfinitePlayer.Picker" />
+
         <!-- 백그라운드 재생 + 차량 블루투스(AVRCP) 제어 -->
         <service
             android:name=".playback.PlaybackService"

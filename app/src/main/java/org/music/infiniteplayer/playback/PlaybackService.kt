@@ -1560,8 +1560,13 @@ class PlaybackService : MediaSessionService() {
             }
             if (!resolvable) continue
             try {
-                cand.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(cand)
+                // 결과를 받아 우리 앱이 실제로 벨소리로 적용하도록 중간 창을 거친다
+                // (선택기 인텐트에는 NEW_TASK 를 붙이지 않는다 → 결과가 우리 찐으로 돌아온다)
+                startActivity(
+                    Intent(this, org.music.infiniteplayer.ui.SoundPickerActivity::class.java)
+                        .putExtra(org.music.infiniteplayer.ui.SoundPickerActivity.EXTRA_TARGET, cand)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
                 started = true
                 break
             } catch (_: Exception) {

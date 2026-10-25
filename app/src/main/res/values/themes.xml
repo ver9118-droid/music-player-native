@@ -9,4 +9,13 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowActivityTransitions">true</item>
     </style>
+
+    <!-- 사운드 선택기 결과를 받아 벨소리로 적용하는 투명 창 (내용은 없고 뒤의 앱이 그대로 보인다) -->
+    <style name="Theme.InfinitePlayer.Picker" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowActivityTransitions">true</item>
+    </style>
 </resources>
