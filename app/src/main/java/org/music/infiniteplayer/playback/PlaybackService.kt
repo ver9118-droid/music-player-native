@@ -1447,6 +1447,8 @@ class PlaybackService : MediaSessionService() {
             if (applied) {
                 setManualStatus("벨소리 적용 완료")
                 toast("벨소리 적용 완료 · $name")
+                // 하이라이트까지 자동으로 잡도록 갤럭시 사운드 선택기를 연다
+                openSoundPicker(saved.uri)
             } else {
                 setManualStatus("벨소리 저장 완료 (권한 필요)")
                 toast("벨소리 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")
@@ -1454,6 +1456,59 @@ class PlaybackService : MediaSessionService() {
             }
             publish()
         }
+    }
+
+    /**
+     * 벨소리 적용 직후 갤럭시 **사운드 선택기**를 연다.
+     *
+     * 삼성 사운드 선택기의 **"선택된 하이라이트만 재생"** 은 공개 API 가 없어
+     * 앱이 직접 켜줄 수 없다. 그래서 저장한 파일이 보이는 화면으로 이동시켜 주고,
+     * 사용자가 그 곡을 한 번 눌러주면 시스템이 하이라이트 구간을 자동으로 잡아
+     * 벨소리로 만들어 준다. (벨소리 자체는 이미 위에서 자동 적용된 상태)
+     *
+     * 기기마다 열리는 앱이 다르므로 후보를 차례로 시도하고,
+     * 하나도 없으면 조용히 넘어간다 (실패가 오류처럼 보이지 않게).
+     */
+    private fun openSoundPicker(saved: Uri?) {
+        if (!Prefs.ringtoneSoundPicker) return
+
+        val candidates = mutableListOf<Intent>()
+        // 1) 삼성 사운드 선택기 앱 직접 실행
+        runCatching {
+            packageManager.getLaunchIntentForPackage("com.samsung.android.app.soundpicker")
+        }.getOrNull()?.let { candidates += it }
+        // 2) 사운드 선택기로 지정한 벨소리 선택 화면
+        candidates += Intent(Intent.ACTION_RINGTONE_PICKER).apply {
+            setPackage("com.samsung.android.app.soundpicker")
+            if (saved != null) putExtra(Intent.EXTRA_RINGTONE_EXISTING_URI, saved)
+        }
+        // 3) 일반 벨소리 선택 화면 (저장한 곡이 목록에 그대로 보인다)
+        candidates += Intent(Intent.ACTION_RINGTONE_PICKER).apply {
+            if (saved != null) putExtra(Intent.EXTRA_RINGTONE_EXISTING_URI, saved)
+        }
+
+        val target = candidates.firstOrNull {
+            runCatching { it.resolve(packageManager) }.getOrNull() != null
+        } ?: return
+        val started = runCatching {
+            target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(target)
+            true
+        }.getOrDefault(false)
+        if (!started) return
+
+        // 선택기가 열린 뒤 안내가 보이도록 잠깐 늦춰서 시스템 토스트로 알려준다
+        // (앱 안 토스트는 화면이 가려져 보이지 않으므로 시스템 토스트를 쓴다)
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            runCatching {
+                android.widget.Toast.makeText(
+                    this,
+                    "사운드 선택기에서 \"선택된 하이라이트만 재생\"을 켜고 같은 곡을 선택하면\n" +
+                        "하이라이트 구간이 자동으로 적용됩니다",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }, 500L)
     }
 
     /** 파일명 (확장자는 실제 포맷에 맞춘다) */
