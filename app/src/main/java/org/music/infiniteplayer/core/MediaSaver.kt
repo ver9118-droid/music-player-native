@@ -22,7 +22,15 @@ import kotlin.coroutines.resume
 object MediaSaver {
 
     private const val MUSIC_DIR = "Music/무한 음악 플레이어"
-    private const val RING_DIR = "Music/Ringtones"
+
+    /**
+     * 벨소리 저장 폴더 (**저장소 루트** 의 `Ringtones`).
+     *
+     * 갤럭시 "사운드 선택기 / 설정 > 소리 및 진동 > 벨소리" 목록은
+     * 저장소 루트의 `Ringtones` 폴더와 `IS_RINGTONE` 플래그를 기준으로 읽는다.
+     * 그래서 `Music/Ringtones` 처럼 뮤직 폴더 안에 넣으면 목록에 아예 안 뜬다.
+     */
+    private const val RING_DIR = "Ringtones"
 
     /**
      * MIME 타입 정리.
@@ -104,10 +112,15 @@ object MediaSaver {
         try {
             val values = ContentValues().apply {
                 put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
+                // 목록에 제목으로 보이게 (파일명과 별개로 표시될 수 있음)
+                put(MediaStore.Audio.Media.TITLE, displayName.substringBeforeLast('.'))
                 put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
                 put(MediaStore.Audio.Media.RELATIVE_PATH, relativePath)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
-                if (isRingtone) put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+                if (isRingtone) {
+                    // 벨소리 목록에 뜨도록 (갤럭시 사운드 선택기 / 설정 > 벨소리)
+                    put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+                }
             }
             uri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
                 ?: return SaveResult(null, "MediaStore 삽입 실패 ($displayName)")

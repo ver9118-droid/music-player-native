@@ -1,7 +1,9 @@
 ﻿package org.music.infiniteplayer.playback
 
 import android.app.PendingIntent
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.SystemClock
@@ -27,12 +29,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.music.infiniteplayer.MainActivity
+import org.music.infiniteplayer.core.CrashLog
 import org.music.infiniteplayer.core.Images
 import org.music.infiniteplayer.core.Prefs
 import org.music.infiniteplayer.data.ResolvedAudio
 import org.music.infiniteplayer.data.Track
 import org.music.infiniteplayer.data.YoutubeRepository
 import java.io.File
+import java.util.Locale
 import kotlin.random.Random
 
 /**
@@ -1463,68 +1467,95 @@ class PlaybackService : MediaSessionService() {
      * 벨소리 적용 직후 갤럭시 **사운드 선택기**를 연다.
      *
      * 삼성 사운드 선택기의 **"선택된 하이라이트만 재생"** 은 공개 API 가 없어
-     * 앱이 직접 켜줄 수 없다. 그래서 저장한 파일이 보이는 화면으로 이동시켜 주고,
-     * 사용자가 그 곡을 한 번 눌러주면 시스템이 하이라이트 구간을 자동으로 잡아
-     * 벨소리로 만들어 준다. (벨소리 자체는 이미 위에서 자동 적용된 상태)
+     * 앱이 직접 켜줄 수 없다. 그래서 다음 화면을 열어 주고, 사용자가
+     * "＋" 를 눌러 곡을 고르고 그 체크를 켜면 시스템이 하이라이트를 잡아준다.
+     * (벨소리 자체는 이미 위에서 자동 적용된 상태)
      *
-     * 기기마다 열리는 앱이 다르므로 후보를 차례로 시도하고,
-     * 하나도 없으면 조용히 넘어간다 (실패가 오류처럼 보이지 않게).
+     * 후보를 차례로 시도하며, 하나도 없으면 조용히 넘어간다.
      */
     private fun openSoundPicker(saved: Uri?) {
         if (!Prefs.ringtoneSoundPicker) return
 
+        val pkg = "com.samsung.android.app.soundpicker"
         val candidates = mutableListOf<Intent>()
-        // 1) 삼성 사운드 선택기 앱 직접 실행
+
+        // 1) 사운드 선택기 안의 "벨소리 선택" 화면 (+ 를 누르는 그 목록)
         try {
-            packageManager.getLaunchIntentForPackage("com.samsung.android.app.soundpicker")
-                ?.let { candidates.add(it) }
+            val probe = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).setPackage(pkg)
+            val hit = packageManager.queryIntentActivities(probe, 0)
+                .firstOrNull()?.activityInfo
+            if (hit != null) {
+                candidates.add(
+                    Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+                        .setComponent(ComponentName(hit.packageName, hit.name)),
+                )
+            }
         } catch (_: Exception) {
-            // 없으면 다음 후보로
+            // 다음 후보로
         }
-        // 2) 사운드 선택기로 지정한 벨소리 선택 화면
-        candidates.add(
-            Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                setPackage("com.samsung.android.app.soundpicker")
-                if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
-            },
-        )
-        // 3) 일반 벨소리 선택 화면 (저장한 곡이 목록에 그대로 보인다)
+
+        // 2) 사운드 선택기 앱 실행 화면 (기기마다 다른 화면이 뜬다)
+        try {
+            packageManager.getLaunchIntentForPackage(pkg)?.let { candidates.add(it) }
+        } catch (_: Exception) {
+            // 다음 후보로
+        }
+
+        // 3) 패키지 안에서 벨소리/선택 화면으로 보이는 액티비티 (위 두 개가 없을 때)
+        try {
+            @Suppress("DEPRECATION")
+            val names = packageManager.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES)
+                .activities?.map { it.name }.orEmpty()
+            if (names.isNotEmpty()) {
+                // 다음에 원인을 찾을 수 있도록 진단 기록에 남긴다
+                CrashLog.saveText("사운드 선택기 액티비티: ${names.joinToString(", ")}")
+            }
+            val preferred = names.firstOrNull { n ->
+                val s = n.substringAfterLast('.').lowercase(Locale.ROOT)
+                s.contains("ringtone") || s.contains("add")
+            }
+            if (preferred != null) {
+                candidates.add(Intent().setComponent(ComponentName(pkg, preferred)))
+            }
+        } catch (_: Exception) {
+            // 다음 후보로
+        }
+
+        // 4) 일반 벨소리 선택 화면 (저장한 곡이 목록에 그대로 보인다)
         candidates.add(
             Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
                 if (saved != null) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
             },
         )
 
-        // 실제로 열 수 있는 첫 번째 후보만 사용한다
-        var target: Intent? = null
+        // 실제로 열 수 있는 첫 번째 후보를 연다 (열기 실패하면 다음 후보로)
+        var started = false
         for (cand in candidates) {
             val resolvable = try {
                 cand.resolveActivity(packageManager) != null
             } catch (_: Exception) {
                 false
             }
-            if (resolvable) {
-                target = cand
+            if (!resolvable) continue
+            try {
+                cand.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(cand)
+                started = true
                 break
+            } catch (_: Exception) {
+                // 권한이 없는 내부 화면이면 건너뛴다
             }
-        }
-        val picked = target ?: return
-        val started = try {
-            picked.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(picked)
-            true
-        } catch (_: Exception) {
-            false
         }
         if (!started) return
 
-        // 선택기가 열리는 중 안내가 보이도록 시스템 토스트로 알려준다
+        // 사용자가 해야 할 정확한 3 단계를 시스템 토스트로 알려준다
         // (앱 안 토스트는 화면이 가려져 보이지 않으므로 시스템 토스트를 쓴다)
         try {
             android.widget.Toast.makeText(
                 this,
-                "사운드 선택기에서 \"선택된 하이라이트만 재생\"을 켜고 같은 곡을 선택하면\n" +
-                    "하이라이트 구간이 자동으로 적용됩니다",
+                "① 벨소리 목록에서 ＋ 를 누르고\n" +
+                    "② 상단 \"선택된 하이라이트만 재생\" 을 켠 뒤 곡을 선택하세요\n" +
+                    "(체크를 안 하면 노래 처음부터 재생됩니다)",
                 android.widget.Toast.LENGTH_LONG,
             ).show()
         } catch (_: Exception) {
