@@ -145,8 +145,15 @@ object MediaSaver {
         val resolver = context.contentResolver
         var uri: Uri? = null
         try {
-            // 같은 이름 파일이 이미 있으면 먼저 지운다 (반복 적용마다 사본이 쌓이는 방지)
-            if (isRingtone) removeExisting(resolver, displayName, relativePath)
+            // 같은 이름 파일이 이미 있으면 → **그대로 재사용**한다.
+            // (지우고 다시 만들면 MediaStore ID 가 바뀌어
+            //  갤럭시 사운드 선택기가 저장해 둔 "선택한 하이라이트" 구간이 풀려
+            //  벨소리가 항상 처음부터 재생된다)
+            if (isRingtone) {
+                findExisting(resolver, displayName, relativePath)?.let {
+                    return SaveResult(it, "")
+                }
+            }
 
             val values = ContentValues().apply {
                 put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
@@ -181,13 +188,19 @@ object MediaSaver {
         }
     }
 
-    /** 같은 폴더에 같은 이름 파일이 있으면 삭제한다 (반복 적용 시 사본 방지) */
-    private fun removeExisting(
+    /**
+     * 같은 폴더에 같은 이름 파일이 이미 있으면 그 **기존 URI** 를 돌려준다.
+     *
+     * 삭제 후 다시 만들지 않고 재사용한다 — 그래야 MediaStore ID 가 유지되어
+     * 사운드 선택기가 파일에 붙여 둔 **하이라이트 구간 정보가 사라지지 않는다.**
+     * (반복 적용 시 사본이 생기지도 않는다)
+     */
+    private fun findExisting(
         resolver: android.content.ContentResolver,
         displayName: String,
         relativePath: String,
-    ) {
-        try {
+    ): Uri? {
+        return try {
             resolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 arrayOf(MediaStore.Audio.Media._ID),
@@ -197,19 +210,18 @@ object MediaSaver {
                 arrayOf(displayName, "$relativePath/", "$relativePath/%"),
                 null,
             )?.use { c ->
-                val idIndex = c.getColumnIndex(MediaStore.Audio.Media._ID)
-                while (c.moveToNext()) {
-                    val id = c.getLong(idIndex)
-                    resolver.delete(
-                        android.content.ContentUris.withAppendedId(
-                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id,
-                        ),
-                        null, null,
+                if (c.moveToFirst()) {
+                    val id = c.getLong(c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID))
+                    android.content.ContentUris.withAppendedId(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id,
                     )
+                } else {
+                    null
                 }
             }
         } catch (_: Exception) {
-            // 조회/삭제 실패는 저장을 막지 않는다 (같은 이름 사본이 하나 더 생길 뿐)
+            // 조회 실패는 저장을 막지 않는다 (그때만 새로 만든다)
+            null
         }
     }
 

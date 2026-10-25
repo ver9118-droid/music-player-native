@@ -1446,9 +1446,16 @@ class PlaybackService : MediaSessionService() {
                 return@launch
             }
 
-            val applied = org.music.infiniteplayer.core.RingtoneSetter.setRingtone(
-                this@PlaybackService, saved.uri,
-            )
+            // 이미 같은 파일이 기본 벨소리로 걸려 있으면 다시 설정하지 않는다.
+            // (재설정하면 사운드 선택기가 저장해 둔 "선택한 하이라이트" 가 풀린다)
+            // → 같은 곡인지 는 URI/파일 경로 + 파일명 두 가지로 비교한다
+            //   (음악 폴더 사본과 루트 Ringtones 사본은 URI 가 다르지만 같은 곡이다)
+            val setter = org.music.infiniteplayer.core.RingtoneSetter
+            val alreadySet = setter.isSameRingtone(
+                this@PlaybackService, setter.currentRingtoneUri(this@PlaybackService), saved.uri,
+            ) || setter.currentRingtoneFileName(this@PlaybackService) ==
+                name.substringBeforeLast('.').lowercase()
+            val applied = alreadySet || setter.setRingtone(this@PlaybackService, saved.uri)
             errorText = ""
             if (applied) {
                 setManualStatus("벨소리 적용 완료")
@@ -1483,6 +1490,7 @@ class PlaybackService : MediaSessionService() {
         // 1) **1순위**: 사운드 선택기 안의 "벨소리 선택" 화면
         //    = 휴대폰 설정 > 소리 > 벨소리 > ＋ 를 누르는 바로 그 화면
         //    (상단에 "선택된 하이라이트만 재생" 스위치가 있고, 여기서 ＋ 를 눌러 곡을 고른다)
+        //    현재 적용 중인 곡은 미리 선택되도록 EXTRA_RINGTONE_EXISTING_URI 를 넣는다
         try {
             val probe = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).setPackage(pkg)
             val hit = packageManager.queryIntentActivities(probe, 0)
@@ -1490,7 +1498,12 @@ class PlaybackService : MediaSessionService() {
             if (hit != null) {
                 candidates.add(
                     Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
-                        .setComponent(ComponentName(hit.packageName, hit.name)),
+                        .setComponent(ComponentName(hit.packageName, hit.name))
+                        .apply {
+                            if (saved != null) {
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, saved)
+                            }
+                        },
                 )
             }
         } catch (_: Exception) {

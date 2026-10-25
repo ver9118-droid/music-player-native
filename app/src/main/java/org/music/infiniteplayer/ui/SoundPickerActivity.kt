@@ -91,7 +91,11 @@ class SoundPickerActivity : ComponentActivity() {
                     finish()
                     return@runOnUiThread
                 }
-                val ok = RingtoneSetter.setRingtone(this, target)
+                // 이미 이 곡이 기본 벨소리로 걸려 있으면 → **다시 설정하지 않는다**.
+                // (다시 설정하면 갤럭시 사운드 선택기가 저장해 둔
+                //  "선택한 하이라이트" 구간이 풀려 벨소리가 처음부터 재생된다)
+                val already = isAlreadyDefault(source, target)
+                val ok = already || RingtoneSetter.setRingtone(this, target)
                 toast(
                     if (ok) "벨소리 적용 완료 · 선택한 곡"
                     else "저장은 했지만 적용 실패 · 권한을 확인해 주세요",
@@ -102,12 +106,31 @@ class SoundPickerActivity : ComponentActivity() {
     }
 
     /**
+     * 고른 소리가 **이미 시스템 기본 벨소리** 로 걸려 있는지.
+     *
+     * 걸려 있으면 다시 설정하지 않는다 — 다시 설정하면(또는 파일을 새로 만들면)
+     * 사운드 선택기가 저장해 둔 **하이라이트 구간이 풀려 처음부터 재생**된다.
+     *
+     * 비교는 ① URI 같음 ② 실제 파일 경로 같음 ③ 파일명 같음 (음악 사본/루트 사본 구분)
+     */
+    private fun isAlreadyDefault(source: Uri, target: Uri?): Boolean {
+        val current = RingtoneSetter.currentRingtoneUri(this) ?: return false
+        if (RingtoneSetter.isSameRingtone(this, current, source)) return true
+        if (target != null && RingtoneSetter.isSameRingtone(this, current, target)) return true
+        val currentName = RingtoneSetter.currentRingtoneFileName(this) ?: return false
+        val srcName = (queryDisplayName(source) ?: source.lastPathSegment ?: "")
+            .substringBeforeLast('.').lowercase()
+        return srcName.isNotEmpty() && srcName == currentName
+    }
+
+    /**
      * 선택 결과를 **저장소 루트 `Ringtones`** 에 넣고 그 URI 를 돌려준다.
      *
      *  - 설정 > 벨소리 목록은 저장소 루트 `Ringtones` 만 읽는다
      *    (Music 폴더에만 있으면 ＋ 목록엔 보이지만 설정 목록엔 안 뜬다)
-     *  - `content://media/...` 라도 Music 폴더 파일일 수 있으므로 **늘 루트로 복사**한다
-     *  - 같은 이름이 있으면 정리되므로 반복할 때마다 사본이 쌓이지 않는다
+     *  - `content://media/...` 라도 Music 폴더 파일일 수 있으므로 루트에 복사한다
+     *  - **같은 이름 파일이 이미 있으면 그대로 재사용** (지우고 다시 만들지 않는다 →
+     *    MediaStore ID 가 바뀌면 사운드 선택기의 하이라이트 구간이 사라진다)
      *  - 복사가 실패하고 원본이 이미 미디어 스토어 파일이면 그 URI 를 그대로 쓴다
      */
     private fun prepare(source: Uri): Uri? {
