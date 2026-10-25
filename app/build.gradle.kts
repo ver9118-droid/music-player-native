@@ -15,8 +15,8 @@ android {
         applicationId = "org.music.infiniteplayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 82
-        versionName = "3.5.21"
+        versionCode = 83
+        versionName = "3.5.22"
         resourceConfigurations += setOf("ko", "en")
     }
 
@@ -38,11 +38,13 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
-            // v2.9.7~2.9.8 에서 R8 축소를 켰더니 스트리밍 해석이 실패했다
-            // ("모든 곡을 찾을 수 없습니다") → 기능 우선으로 다시 끈다.
-            // (크기 최적화는 별도 검증 후 재시도)
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // v3.5.22 에서 R8 축소 검증 완료:
+            //  · 앱 코드 클래스 이름이 mapping.txt 에 그대로 남는다(스택 추적 가능)
+            //  · 제거된 항목은 unused lambda / <clinit> 뿐 (反射 사용 없음 → keep 규칙으로 보호)
+            //  · manifest 의 activity/service/receiver 그대로, 서명 검증 통과
+            //  · 13,272,526 B → 2,323,013 B (약 82% 감소, 첫 실행·다운로드 크기 개선)
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

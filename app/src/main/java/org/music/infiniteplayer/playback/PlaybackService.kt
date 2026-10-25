@@ -2,6 +2,7 @@
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
@@ -120,6 +121,9 @@ class PlaybackService : MediaSessionService() {
     private var shuffleOn = false
     private var volume = 0.85f
 
+    /** 차량 외부 디스플레이 영상 출력 (블루투스 AVRCP 는 메타데이터만 보낼 수 있다) */
+    private var carDisplay: CarDisplay? = null
+
     // ── 생애주기 ───────────────────────────────────────────────
     override fun onCreate() {
         super.onCreate()
@@ -178,6 +182,13 @@ class PlaybackService : MediaSessionService() {
             onCallStarted = { onCallStarted() },
             onCallEnded = { onCallEnded() },
         ).also { it.start() }
+
+        carDisplay = CarDisplay(
+            context = this,
+            scope = scope,
+            youtube = youtube,
+            mainPlayer = { player },
+        ).also { it.start() }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -191,6 +202,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        carDisplay?.stop()
+        carDisplay = null
         callGuard?.stop()
         callGuard = null
         PlayerBus.detach(this)
@@ -373,7 +386,9 @@ class PlaybackService : MediaSessionService() {
         val p = player ?: return
         val d = p.duration
         val target = if (d > 0 && ms > d - 1_500) d else ms
-        p.seekTo(target.coerceAtLeast(0))
+        val seek = target.coerceAtLeast(0)
+        p.seekTo(seek)
+        carDisplay?.onSeek(seek)
         publish()
     }
 
@@ -693,13 +708,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun mediaItem(entry: Entry, audio: ResolvedAudio): MediaItem {
-        val md = MediaMetadata.Builder()
-            .setTitle(entry.track.title)
-            .setArtist(entry.track.artist)
-            .setAlbumTitle(entry.track.album)
-            .setIsPlayable(true)
-            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-        entry.thumb?.let { md.setArtworkUri(Uri.fromFile(it)) }
+        val md = metadataBuilder(entry)
         // 로컬로 내려받은 파일이 있으면 그걸 재생 (직접 스트리밍 실패 대비)
         val local = entry.localFile
         val uri = if (local != null && local.exists()) Uri.fromFile(local) else Uri.parse(audio.url)
@@ -710,8 +719,88 @@ class PlaybackService : MediaSessionService() {
             .build()
     }
 
+    /**
+     * AVRCP 메타데이터(차량 화면/계기판에 표시되는 곡 정보)를 만든다.
+     *
+     * MediaSession 은 메타데이터를 **현재 MediaItem** 에서 읽는다.
+     * 많은 차량 헤드유닛이 artworkUri 는 무시하고 압축 이미지 바이트만
+     * 표시하므로 아트웍을 실제 이미지 바이트(front cover)로 넣는다.
+     * 캐시에 없으면 URI 만 넣고, 바이트가 준비되면 publishCarMetadata 가
+     * 메타데이터를 한 번 더 보낸다.
+     */
+    private fun metadataBuilder(entry: Entry): MediaMetadata.Builder {
+        val md = MediaMetadata.Builder()
+            .setTitle(entry.track.title)
+            .setArtist(entry.track.artist)
+            .setAlbumTitle(entry.track.album)
+            .setIsPlayable(true)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+        entry.thumb?.let { md.setArtworkUri(Uri.fromFile(it)) }
+        val bytes = Images.cachedBytes(entry.track.thumbUrl)
+        if (bytes != null) md.setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+        return md
+    }
+
+    /** 메타데이터를 보낸 곡 (같은 곡에서 반복 전송하지 않기 위해) */
+    private var carMetadataTrackId = ""
+
     private fun onTrackChanged(entry: Entry) {
         publish()
+        publishCarMetadata(entry)
+        carDisplay?.onTrackChanged(entry.track)
+    }
+
+    /**
+     * 곡 메타데이터를 차량에 한 번 보낸다.
+     *
+     * 아트웍 바이트가 아직 캐시에 없는 곡은 캐시를 채운 뒤 **한 번만** 다시
+     * 보낸다 — 그래야 차량 화면에 앨범 사진이 뜬다. 같은 곡을 계속 보내면
+     * 차량이 헤더를 다시 읽어 표시가 흔들리므로 전송 횟수를 곡당 1 회로 제한한다.
+     */
+    private fun publishCarMetadata(entry: Entry) {
+        val id = entry.track.id
+        val hasArt = Images.cachedBytes(entry.track.thumbUrl) != null
+        if (carMetadataTrackId == id && hasArt) return
+        if (!hasArt) {
+            // 아직 캐시에 없는 이미지 — 채운 뒤 한 번만 다시 시도한다
+            if (entry.track.thumbUrl.isBlank()) {
+                carMetadataTrackId = id
+                publishMetadataForCurrentItem(entry)
+                return
+            }
+            scope.launch {
+                try {
+                    Images.load(entry.track.thumbUrl, 256)
+                } catch (_: Exception) {
+                }
+                if (currentEntry?.track?.id == id) publishCarMetadata(entry)
+            }
+            return
+        }
+        carMetadataTrackId = id
+        publishMetadataForCurrentItem(entry)
+    }
+
+    /**
+     * 현재 MediaItem 의 메타데이터를 아트웍 포함해 다시 덮어쓴다.
+     *
+     * buildUpon() 으로 URI 를 그대로 유지한 채 메타데이터만 바꾸면
+     * ExoPlayer 는 미디어 소스를 다시 만들지 않고 재생을 이어간다
+     * (ProgressiveMediaSource.canUpdateMediaItem → 같은 URI ).
+     * 그래서 곡이 처음부터 다시 시작하지 않는다.
+     */
+    private fun publishMetadataForCurrentItem(entry: Entry) {
+        val p = player ?: return
+        val idx = p.currentMediaItemIndex
+        val item = p.getCurrentMediaItem() ?: return
+        if (item.mediaId != entry.track.id) return
+        val updated = item.buildUpon()
+            .setMediaMetadata(metadataBuilder(entry).build())
+            .build()
+        try {
+            p.replaceMediaItem(idx, updated)
+        } catch (_: Exception) {
+        }
     }
 
     // ── 통화 ───────────────────────────────────────────────────
@@ -743,6 +832,8 @@ class PlaybackService : MediaSessionService() {
             var saveTick = 0
             while (isActive) {
                 publish()
+                // 차량 디스플레이 영상 위치 맞추기 (자주 확인해도 값이 많이 어긋날 때만 이동)
+                carDisplay?.sync()
                 // 재생 위치를 주기적으로 저장 (서비스 죽어도 복원되도록)
                 saveTick++
                 if (saveTick % 8 == 0) {
@@ -877,6 +968,7 @@ class PlaybackService : MediaSessionService() {
                     uiLatency = uiLatencyText(),
                     queueInfo = queue,
                     selfTest = selfTestText,
+                    carDisplay = carDisplay?.info() ?: "",
                 )
             )
         }
@@ -1182,6 +1274,8 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // 차량 디스플레이 영상은 소리를 내지 않는 별도 플레이어 → 상태만 따라간다
+            carDisplay?.onPlayState(isPlaying)
             if (isPlaying) {
                 statusText = "재생 중"
                 // 실제로 재생 중이면 지난 오류 표시는 지운다.
@@ -1427,29 +1521,45 @@ class PlaybackService : MediaSessionService() {
                 return@launch
             }
 
-            val ext = org.music.infiniteplayer.core.MediaSaver.extensionFor(useAudio.mimeType)
+            // 2) 갤럭시처럼 하이라이트 구간을 앱이 찾아 그 부분만 잘라낸다.
+            //    (삼성은 하이라이트를 자기 DB 에 저장하고 밖으로 바꿔 주는 API 가 없다
+            //     → 구간을 파일 자체에 넣으면 사운드 선택기를 열지 않아도 그대로 울린다)
+            val fade = org.music.infiniteplayer.core.Prefs.ringtoneFade
+            var clip = src
+            var window: org.music.infiniteplayer.core.Highlight.Window? = null
+            var mime = useAudio.mimeType
+            val w = org.music.infiniteplayer.core.Highlight.analyze(src)
+            if (w != null) {
+                // 페이드 인/아웃은 **파일 안에** 들어 있어야 한다 — 벨소리는 시스템이 재생하므로
+                // 앱이 음량을 조절할 수 없다. 그래서 페이드를 켠 경우에만 PCM 으로 디코딩해
+                // 게인 램프를 입히고 AAC 로 재인코딩한다 (페이드가 0 이면 샘플 그대로 복사).
+                val outExt = if (fade > 0f) "m4a"
+                else org.music.infiniteplayer.core.MediaSaver.extensionFor(mime)
+                val cut = File(cacheDir, "ringtone_cut.${outExt}")
+                val ok = if (fade > 0f) {
+                    val encoded = org.music.infiniteplayer.core.Highlight.encodeWithFade(
+                        src, cut, w, fade.toDouble(), fade.toDouble(),
+                    )
+                    if (encoded) mime = "audio/mp4a-latm"
+                    encoded
+                } else {
+                    org.music.infiniteplayer.core.Highlight.cut(src, cut, w)
+                }
+                if (ok) {
+                    clip = cut
+                    window = w
+                }
+            }
+
+            val ext = org.music.infiniteplayer.core.MediaSaver.extensionFor(mime)
             val title = org.music.infiniteplayer.core.MediaSaver.safeName(
                 entry.track.title.ifBlank { "곡명" },
             )
             // 파일명은 곡명을 앞으로 (사운드 선택기 ＋ 목록에서 곡 이름으로 찾을 수 있게)
             val name = "$title (벨소리).$ext"
 
-            // 2) 갤럭시처럼 하이라이트 구간을 앱이 찾아 그 부분만 잘라낸다.
-            //    (삼성은 하이라이트를 자기 DB 에 저장하고 밖으로 바꿔 주는 API 가 없다
-            //     → 구간을 파일 자체에 넣으면 사운드 선택기를 열지 않아도 그대로 울린다)
-            var clip = src
-            var window: org.music.infiniteplayer.core.Highlight.Window? = null
-            val w = org.music.infiniteplayer.core.Highlight.analyze(src)
-            if (w != null) {
-                val cut = File(cacheDir, "ringtone_cut.${ext}")
-                if (org.music.infiniteplayer.core.Highlight.cut(src, cut, w)) {
-                    clip = cut
-                    window = w
-                }
-            }
-
             val saved = org.music.infiniteplayer.core.MediaSaver.saveAsRingtone(
-                this@PlaybackService, clip, name, useAudio.mimeType,
+                this@PlaybackService, clip, name, mime,
             )
             if (saved.uri == null) {
                 errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
@@ -1472,7 +1582,10 @@ class PlaybackService : MediaSessionService() {
             errorText = ""
             if (applied) {
                 setManualStatus("벨소리 적용 완료")
-                val where = if (window != null) " · 하이라이트 ${window.label()}" else " · 곡 전체"
+                val where = if (window != null) {
+                    val f = if (fade > 0f) " · 페이드 ${fade}초" else ""
+                    " · 하이라이트 ${window.label()}$f"
+                } else " · 곡 전체"
                 toast("벨소리 적용 완료 · $name$where")
             } else {
                 setManualStatus("벨소리 저장 완료 (권한 필요)")

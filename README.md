@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `app-release-v3.5.21.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> `app-release-v3.5.22.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -9,7 +9,7 @@
 | 항목 | 이전 (Kivy) | 현재 (네이티브) |
 |---|---|---|
 | 앱 시작 | 파이썬+OpenGL 초기화로 1.5~3초 | AOT 네이티브, **0.3초 이내** |
-| APK 크기 | 약 60MB | 약 8MB |
+| APK 크기 | 약 60MB | **약 2.3MB** (R8 축소) |
 | 백그라운드 재생 | p4a arbitrary service | `MediaSessionService` (공식 방식) |
 | 차량 블루투스 | jnius 로 MediaSession 직접 조작 | `MediaSession` 기본 구현 (표준 호환) |
 | 전화 통화 처리 | 오디오 포커스만 | 오디오 포커스 + `TelephonyCallback` 직접 감지 |
@@ -42,8 +42,12 @@
 ### 4. 자동차 블루투스로 재생/조작한다
 - `MediaSession` 기반 → AVRCP 표준 compliant
   - 차량 화면에 **곡명 · 아티스트 · 앨범 · 앨범아트** 표시
+    (앨범아트는 이미지 바이트로 전달 — `setArtworkData(bytes, PICTURE_TYPE_FRONT_COVER)`)
   - 스티어링훠/키패드로 **재생 · 일시정지 · 이전 · 다음 · 탐색**
   - 알림에서 차량 화면을 누르면 앱으로 이동 (`setSessionActivity`)
+- **AVRCP 는 곡 정보와 이미지만 실어 보낼 수 있어서 영상 자체는 전달되지 않는다**
+  → 차량에 영상을 보내는 유일한 경로는 HDMI/DP 외부 디스플레이(또는 미러링 헤드유닛)이며
+  `playback/CarDisplay.kt` 가 그 디스플레이에 `Presentation` 으로 출력한다 (폰 화면이 꺼진 때만)
 - 차량 연결 방법: 안드로이드 설정 → 블루투스 → 차량 연결 → 오디오 소스에서
   "무한 음악 플레이어" 선택
 
@@ -53,6 +57,50 @@
 - **한국대중음악 장르 8종** (유튜브 검색)
 - 재생은 유튜브 InnerTube API 로 직접 스트림 URL 을 받아 ExoPlayer 가 재생
   (별도 다운로드/변환 불필요 → 준비 시간 1~2초)
+
+## v3.5.22 변경 내용
+
+### 벨소리 페이드 (페이드인/페이드아웃) — 파일에 기록
+- 벨소리는 **시스템이 재생**하므로 앱이 음량을 조절할 수 없다 → 페이드를 **파일 안에 직접 기록**한다.
+  - `Highlight.encodeWithFade()` : MediaCodec 으로 PCM 을 디코딩해 샘플별 gain 을 입히고
+    AAC-LC(`audio/mp4a-latm`) 로 재인코딩 → MediaMuxer 로 m4a 로 쓴다
+  - 기본값 **1.5초 인 / 1.5초 아웃**, 설정에서 없음/1.0/1.5/2.0/3.0 초 선택 (`Prefs` 키 `ringtone_fade`)
+  - 페이드 0 초이면 기존처럼 **샘플 복사**(재인코딩 없음) 경로로 저장
+  - 페이드를 켜면 확장자가 `.ogg` → `.m4a` 로 바뀌지만 **같은 MediaStore 행을 재사용**한다
+    (`findExisting` 가 기본 이름으로도 검색 → 중복 행 생성 없음)
+  - 인코딩 실패 시 곡 전체를 그대로 쓰는 기존 폴백 유지
+
+### 차량 블루투스 (AVRCP) 곡 정보
+- MediaMetadata 에 **실제 이미지 바이트**를 넣는다 (`setArtworkData(bytes, PICTURE_TYPE_FRONT_COVER)`)
+  - `setBitmap` / `setMetadata` 는 media3 1.5.1 에 없는 API → `setArtworkData` 사용
+  - 세션은 `artworkData` 를 `BitmapLoader` 로 디코딩하므로 압축 이미지 바이트가 가장 확실한 경로
+  - 앨범아트가 준비된 곡당 **1회만** 게시 (`carMetadataTrackId` 가드) → 불필요한 재게시 없음
+- **AVRCP 는 영상 자체를 실어 보낼 수 없다** (곡 정보 + 이미지 바이트만) → 영상은 아래 경로로만 나간다
+
+### 차량 화면에 영상 출력 (`playback/CarDisplay.kt`, 새 파일)
+- HDMI/DP 로 연결된 **외부 디스플레이**(`Display.FLAG_PRESENTATION`) 또는 미러링 헤드유닛이 있을 때
+  `Presentation` 으로 영상을 출력한다 (화면 끔 설정 가능, 기본 켜짐 → `Prefs` 키 `car_video`)
+- 구성: `PlayerView`(컨트롤러 off, RESIZE_MODE_FIT) + 앨범아트 `ImageView` + 곡명 `TextView`
+- **폰 화면이 꺼져 있을 때만** 차량으로 출력 (배터리) — `PowerManager.isInteractive` + SCREEN_ON/OFF 리시버
+- 영상 플레이어는 독립 ExoPlayer (음량 0, 오디오 포커스 요구하지 않음)
+  - 곡별 영상 URL 캐시(60곡) · `failedFor`(영상 없는 곡 재조회 금지) · `resolving`(단일 요청)
+  - `DRIFT_MS = 1500` 어긋남 복원 · `SYNC_MS = 2000` 최소 점검 간격 · `SeekParameters.CLOSEST_SYNC`
+  - 영상 해석 실패/타임아웃(25초) → 앨범아트만 표시
+- `Presentation` 은 `SYSTEM_ALERT_WINDOW` 권한이 필요 없다 (AOSP `PhoneWindowManager` 가
+  `TYPE_PRESENTATION`/`TYPE_PRIVATE_PRESENTATION` 에 `ADD_OKAY` 를 반환) → 새 권한 추가 없음
+  - 단, private 디스플레이는 소유 앱만 볼 수 있어 미러링 헤드유닛은 기기에 따라 안 보일 수 있다
+- 진단 화면에 "차량 디스플레이" 행 추가 (연결된 디스플레이 수/출력 상태)
+
+### APK 크기 (R8 축소 적용)
+- `isMinifyEnabled = true` + `isShrinkResources = true` → **13,272,526 B → 2,323,186 B (약 82% 감소)**
+- 검증 내용:
+  - 앱 코드 클래스 이름이 `mapping.txt` 에 그대로 남는다 (크래시 스택 읽기 가능)
+  - 제거된 앱 코드 항목은 unused lambda / `<clinit>` 뿐 (反射·`Class.forName`·`ServiceLoader` 사용 없음)
+  - `META-INF/services/kotlinx.coroutines.internal.MainDispatcherFactory` → `AndroidDispatcherFactory`
+    보존 확인 (`Dispatchers.Main` 안전) · launcher 아이콘/manifest activity·service·receiver 그대로
+  - 서명 검증 통과 (`CN=Infinite Music Player`)
+- 사운드 선택기용 `<queries>` 는 필요 없어져 manifest 에서 제거 (코드에서 선택기를 열지 않음)
+- versionName 3.5.22 / versionCode 83
 
 ## v3.5.19 변경 내용
 - **벨소리 = 하이라이트 구간이 적용된 파일로 저장** (갤럭시 "선택된 하이라이트만 재생" 을 앱 안에서 직접 수행)

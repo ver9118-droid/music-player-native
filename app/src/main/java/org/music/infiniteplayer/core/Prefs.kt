@@ -30,6 +30,8 @@ object Prefs {
     const val KEY_LAST_ERROR_AT = "last_error_at" // 최근 오류 시각
     const val KEY_DIAGNOSTICS = "diagnostics"     // 진단 모드 (오류 표시·기록)
     const val KEY_MELON_MV = "melon_mv_enabled"   // 멜론 최신 뮤직비디오 사용
+    const val KEY_RINGTONE_FADE = "ringtone_fade" // 벨소리 페이드 인/아웃 (초)
+    const val KEY_CAR_VIDEO = "car_video"         // 차량 외부 디스플레이 영상 출력
 
     fun init(ctx: Context) {
         if (!::sp.isInitialized) {
@@ -101,6 +103,29 @@ object Prefs {
     var melonMvEnabled: Boolean
         get() = sp.getBoolean(KEY_MELON_MV, true)
         set(v) = sp.edit().putBoolean(KEY_MELON_MV, v).apply()
+
+    /**
+     * 벨소리 페이드 인 / 페이드 아웃 길이 (초, 둘 다 같은 값).
+     *
+     * 벨소리는 **시스템이** 재생하므로 페이드는 파일 안에 실제로 기록해야 한다
+     * (Highlight.encodeWithFade 가 게인 램프를 입혀 AAC 로 인코딩한다).
+     * 0 이면 음질 손실이 없는 샘플 복사 경로로 잘라낸다.
+     */
+    var ringtoneFade: Float
+        get() = sp.getFloat(KEY_RINGTONE_FADE, 1.5f)
+        set(v) = sp.edit().putFloat(KEY_RINGTONE_FADE, v.coerceIn(0f, 5f)).apply()
+
+    /**
+     * 차량 외부 디스플레이 영상 출력.
+     *
+     * 블루투스(AVRCP) 는 메타데이터만 실을 수 있어서 영상 자체는 전달되지 않는다.
+     * 그래서 차량 화면에 영상이 나타나려면 HDMI/DP 로 연결된 디스플레이(또는
+     * 미러링 헤드유닛)이 실제로 있어야 한다. 이 설정은 그 디스플레이가 있을 때
+     * 영상을 출력할지 정한다. (없으면 앨범아트·곡 정보만 표시된다)
+     */
+    var carVideo: Boolean
+        get() = sp.getBoolean(KEY_CAR_VIDEO, true)
+        set(v) = sp.edit().putBoolean(KEY_CAR_VIDEO, v).apply()
 
     // ── 재생목록 복원용 (서비스가 죽어도 곡이 사라지지 않게) ──
     /** 재생목록 전체 (JSON) */

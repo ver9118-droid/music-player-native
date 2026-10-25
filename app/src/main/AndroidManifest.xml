@@ -21,14 +21,8 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
-    <!-- Android 11+ 패키지 가시성: 벨소리 적용 직후 "갤럭시 사운드 선택기"를
-         찾고 여는 데 필요. 없으면 사운드 선택기가 목록에 안 떠서 열 수 없다. -->
-    <queries>
-        <package android:name="com.samsung.android.app.soundpicker" />
-        <intent>
-            <action android:name="android.intent.action.RINGTONE_PICKER" />
-        </intent>
-    </queries>
+    <!-- v3.5.22 부터 "바로 적용" 경로가 MediaStore 를 직접 쓰므로 사운드 선택기를
+         열지 않는다 → 패키지 가시성(queries) 은 필요 없다. -->
 
     <application
         android:name=".App"

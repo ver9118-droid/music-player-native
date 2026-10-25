@@ -1441,6 +1441,7 @@ fun DiagnosticsScreen(
                     DiagRow("주소 응답", diag.streamProbe.ifBlank { "-" })
                     DiagRow("시스템 볼륨", diag.systemVolume.ifBlank { "-" })
                     DiagRow("출력 경로", diag.audioRoute.ifBlank { "-" })
+                     DiagRow("차량 디스플레이", diag.carDisplay.ifBlank { "연결된 디스플레이 없음" })
                     DiagRow("서비스 상태", diag.serviceState.ifBlank { "-" })
                     DiagRow("알림", diag.notificationState.ifBlank { "-" })
                     DiagRow("UI 응답", diag.uiLatency.ifBlank { "-" })
@@ -1678,6 +1679,10 @@ fun SettingsScreen(
     onQuality: (String) -> Unit,
     mvEnabled: Boolean,
     onMelonMv: (Boolean) -> Unit,
+    ringtoneFade: Float,
+    onRingtoneFade: (Float) -> Unit,
+    carVideo: Boolean,
+    onCarVideo: (Boolean) -> Unit,
     favorites: List<Track>,
     onOpenFavorites: () -> Unit,
 ) {
@@ -1790,6 +1795,29 @@ fun SettingsScreen(
                         RepeatChip("낮음", quality == "low") { onQuality("low") }
                     }
                 }
+                SettingRow(
+                    title = "벨소리 페이드 인/아웃",
+                    subtitle = if (ringtoneFade <= 0f) {
+                        "없음 · 잘라낸 구간을 그대로 복사합니다 (재인코딩 없음)"
+                    } else {
+                        "${ringtoneFade}초 · 구간 시작과 끝에 페이드가 **파일 안에 기록**됩니다"
+                    },
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        RepeatChip("없음", ringtoneFade <= 0f) { onRingtoneFade(0f) }
+                        RepeatChip("1.0", ringtoneFade == 1.0f) { onRingtoneFade(1.0f) }
+                        RepeatChip("1.5", ringtoneFade == 1.5f) { onRingtoneFade(1.5f) }
+                        RepeatChip("2.0", ringtoneFade == 2.0f) { onRingtoneFade(2.0f) }
+                        RepeatChip("3.0", ringtoneFade == 3.0f) { onRingtoneFade(3.0f) }
+                    }
+                }
+                Text(
+                    "벨소리는 시스템이 재생하므로 페이드는 파일 안에 들어 있어야 울립니다.\n" +
+                        "페이드를 켠 곡은 AAC 로 재인코딩해 저장합니다 (없음일 때는 음질 변화 없이 복사).",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 18.dp, top = 6.dp),
+                )
             }
 
             item {
@@ -1806,6 +1834,28 @@ fun SettingsScreen(
                         lineHeight = 19.sp,
                     )
                 }
+                SettingRow(
+                    title = "차량 화면에 영상 출력",
+                    subtitle = if (carVideo) {
+                        "HDMI/미러링으로 연결된 디스플레이가 있을 때 영상을 출력합니다"
+                    } else {
+                        " 끔 · 차량에는 곡 정보와 앨범아트만 표시됩니다"
+                    },
+                ) {
+                    Switch(
+                        checked = carVideo,
+                        onCheckedChange = onCarVideo,
+                        colors = switchColors(),
+                    )
+                }
+                Text(
+                    "블루투스(AVRCP) 는 곡 정보와 앨범이미지만 실어 보낼 수 있어서 영상 자체는 전달되지 않습니다.\n" +
+                        "영상은 HDMI/DP 로 연결된 디스플레이(또는 미러링 헤드유닛)가 실제로 있을 때만 차량 화면에 나갑니다.\n" +
+                        "폰 화면이 꺼져 있을 때만 차량으로 출력합니다 (배터리).",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(start = 18.dp, top = 6.dp),
+                )
             }
 
             item {

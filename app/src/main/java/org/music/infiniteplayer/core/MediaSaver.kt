@@ -129,7 +129,7 @@ object MediaSaver {
                 // 앱이 만든 파일 → 이미 있으면 재사용/정리 (사용자 파일과 구분)
                 val kept = keepSingleCopy(context, name)
                 if (kept != null) {
-                    overwrite(context, resolver, kept, file, mime)
+                    overwrite(context, resolver, kept, file, mime, name)
                     return@withContext SaveResult(kept, "")
                 }
             } else {
@@ -198,9 +198,22 @@ object MediaSaver {
         uri: Uri,
         file: File,
         mimeType: String,
+        displayName: String,
     ): Boolean {
         // 설정 벨소리 목록에 보이게: Ringtones 폴더 + 플래그 (ID 는 유지된다)
         val moved = moveToRingtoneFolder(resolver, uri) ?: uri
+
+        // 행 이름/타입을 지금 파일에 맞춘다 (페이드 설정을 켜고 끄면 .ogg ↔ .m4a 로 바뀔 수 있다)
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Audio.Media.TITLE, displayName.substringBeforeLast('.'))
+                put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
+            }
+            resolver.update(moved, values, null, null)
+        } catch (_: Exception) {
+            // 이름 정리 실패는 저장을 막지 않는다
+        }
 
         val wrote = try {
             resolver.openOutputStream(moved)?.use { out ->
@@ -226,6 +239,7 @@ object MediaSaver {
                         val flags = ContentValues().apply {
                             put(MediaStore.Audio.Media.IS_RINGTONE, 1)
                             put(MediaStore.Audio.Media.IS_MUSIC, 1)
+                            put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
                         }
                         resolver.update(moved, flags, null, null)
                     } catch (_: Exception) {
@@ -312,21 +326,26 @@ object MediaSaver {
      *
      * 삭제 후 다시 만들지 않고 재사용한다 — 그래야 MediaStore ID 가 유지되어
      * 목록에서 같은 곡이 두 개로 보이지 않는다. (반복 적용 시 사본이 생기지도 않는다)
+     *
+     * 확장자 없이(곡명 + " (벨소리)") 도 비교한다 — 페이드 설정을 켜고 끄면 파일이
+     * .ogg ↔ .m4a 로 바뀔 수 있어, 확장자만 다른 같은 곡이 목록에 두 개로 뜨지 않게 한다.
      */
     private fun findExisting(
         resolver: android.content.ContentResolver,
         displayName: String,
         relativePath: String,
     ): Uri? {
+        val base = displayName.substringBeforeLast('.')
         return try {
             resolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 arrayOf(MediaStore.Audio.Media._ID),
-                "${MediaStore.Audio.Media.DISPLAY_NAME}=? AND (" +
+                "(${MediaStore.Audio.Media.DISPLAY_NAME}=? OR " +
+                    "${MediaStore.Audio.Media.DISPLAY_NAME} LIKE ?) AND (" +
                     "${MediaStore.Audio.Media.RELATIVE_PATH}=? OR " +
                     "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?)",
                 // RELATIVE_PATH 는 끝 슬래시 없이 저장되는 경우가 있다 (Ringtones, Music)
-                arrayOf(displayName, relativePath, "$relativePath/%"),
+                arrayOf(displayName, "$base.%", relativePath, "$relativePath/%"),
                 null,
             )?.use { c ->
                 if (c.moveToFirst()) {
