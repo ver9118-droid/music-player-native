@@ -27,14 +27,19 @@ object MediaSaver {
     /**
      * 벨소리 파일이 놓이는 폴더.
      *
-     * 설정 > 소리 및 진동 > 벨소리 목록은 **Ringtones 폴더에 physically 있는 파일** 만 보여 준다
+     * 설정 > 소리 및 진동 > 벨소리 목록은 **Ringtones 폴더에 실제로 있는 파일** 만 보여 준다
      * (`RingtoneManager.isCustomRingtone` 는 Ringtones / Notifications / Alarms 폴더 파일만 인정한다).
      * Music 폴더에 `IS_RINGTONE=1` 로 넣으면 사운드 선택기 ＋ 목록에는 보이지만
      * 설정 벨소리 목록에는 보이지 않는다 — 사운드 선택기에서 완료하면 파일이 Ringtones 폴더로
      * 복사된 뒤에야 설정 목록에 나타난다.
      *
      * 그래서 이 앱은 파일을 **Ringtones 폴더에 직접** 넣는다. 플래그는 둘 다 켠다:
-     * `IS_RINGTONE=1` (설정 벨소리 목록) + `IS_MUSIC=1` (음악 라이브러리 · 사운드 선택기 ＋ 목록).
+     * `IS_RINGTONE=1` (설정 벨소리 목록) + `IS_MUSIC=1` (음악 라이브러리).
+     *
+     * 알려진 동작: 사운드 선택기 ＋ 목록은 **Music 폴더** 파일만 보여 준다 →
+     * Ringtones 폴더에 있는 파일은 선택기에 나타나지 않는다.
+     * 앱이 벨소리를 직접 적용하므로 선택기를 열 필요가 없어 이 동작을 유지한다
+     * (두 목록 모두에 보이게 하려면 같은 파일을 두 폴더에 두어야 해 중복이 생긴다).
      */
     private const val RING_DIR = "Ringtones"
 
@@ -214,7 +219,7 @@ object MediaSaver {
             }
             if (path != null) {
                 // 스캐너는 폴더 이름으로 플래그를 다시 계산한다 (Ringtones → is_music 가 0 이 될 수 있다)
-                // → 스캔이 끝난 뒤 플래그를 다시 켠다 (설정 벨소리 목록 + 사운드 선택기 ＋ 목록 양쪽 유지)
+                // → 스캔이 끝난 뒤 플래그를 다시 켠다 (음악 라이브러리 표시 유지)
                 MediaScannerConnection.scanFile(context, arrayOf(path), arrayOf(mimeType)) { _, scanned ->
                     if (scanned == null) return@scanFile
                     try {
