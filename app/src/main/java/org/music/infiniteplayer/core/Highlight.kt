@@ -242,34 +242,43 @@ object Highlight {
                             }
                             val work = w
                             work.clear()
+                            // 디코더가 준 버퍼에서 **유효 바이트만** 복사한다.
+                            // 버퍼의 limit 은 이전 호출의 값으로 남아 있을 수 있으므로
+                            // info.offset + info.size 로 명시적으로 제한해야 한다.
                             val src = pcm.duplicate()
                             src.position(info.offset)
-                            src.limit(info.offset + info.size)
+                            src.limit(min(src.capacity(), info.offset + info.size))
+                            val valid = src.remaining()
+                            if (valid <= 0) {
+                                decoder.releaseOutputBuffer(outIndex, false)
+                                continue
+                            }
                             work.put(src)
-                            work.limit(info.size)
+                            work.limit(valid)
 
                             val gainInfo = MediaCodec.BufferInfo()
                             gainInfo.offset = 0
-                            gainInfo.size = info.size
+                            gainInfo.size = valid
                             gainInfo.presentationTimeUs = info.presentationTimeUs
                             applyGain(work, gainInfo, startUs, endUs, inSec, outSec)
 
                             // 인코더 시간 기준은 파일 시작(0) 이다
                             work.position(0)
                             val basePts = info.presentationTimeUs - startUs
-                            var left = info.size
+                            var left = valid
                             while (left > 0) {
                                 val encIn = encoder.dequeueInputBuffer(10_000)
                                 if (encIn < 0) break
                                 val encBuffer = encoder.getInputBuffer(encIn) ?: break
                                 encBuffer.clear()
-                                val chunk = min(left, encBuffer.remaining())
+                                // work 의 유효 범위를 넘기지 않는다 (BufferUnderflow 방지)
+                                val chunk = min(min(left, work.remaining()), encBuffer.remaining())
                                 if (chunk <= 0) break
                                 // 인코더 입력 버퍼 캐패시티가 작을 수 있으므로 chunk 로 나눠 넣는다
                                 work.limit(work.position() + chunk)
                                 encBuffer.put(work)
-                                work.limit(info.size)
-                                val pts = basePts + (info.size - left) * 1_000_000L / frameBytes
+                                work.limit(valid)
+                                val pts = basePts + (valid - left) * 1_000_000L / frameBytes
                                 encoder.queueInputBuffer(encIn, 0, chunk, pts, 0)
                                 left -= chunk
                             }
@@ -437,7 +446,14 @@ object Highlight {
 
         buffer.position(info.offset)
         buffer.order(ByteOrder.LITTLE_ENDIAN)
-        val samples = info.size / 2
+        // 버퍼의 limit 을 넘기지 않는다 (BufferUnderflow 방지).
+        // info.size 가 홀수일 수 있으므로 읽을 수 있는 16bit 샘플 개수로 제한한다.
+        val readable = buffer.limit() - buffer.position()
+        val samples = min(info.size / 2, readable / 2)
+        if (samples <= 0) {
+            buffer.order(ByteOrder.BIG_ENDIAN)
+            return
+        }
         for (i in 0 until samples) {
             val v = (buffer.short * gain).toInt().coerceIn(-32768, 32767)
             buffer.putShort(v.toShort())

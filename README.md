@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `app-release-v3.5.27.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> `app-release-v3.5.28.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -53,6 +53,16 @@
 - **한국대중음악 장르 8종** (유튜브 검색)
 - 재생은 유튜브 InnerTube API 로 직접 스트림 URL 을 받아 ExoPlayer 가 재생
   (별도 다운로드/변환 불필요 → 준비 시간 1~2초)
+
+## v3.5.28 변경 내용
+- **페이드 실패 원인 수정** — `BufferUnderflowException`
+  - 디코더 출력 버퍼의 `limit` 이 이전 호출 값으로 남아 있어 `applyGain` 이 유효하지 않은
+    바이트까지 읽었다. 이제 `info.offset + info.size` 로 **유효 바이트만** 복사하고,
+    그 개수 안에서만 16bit 샘플을 읽는다.
+  - `info.size` 가 홀수일 때 마지막 샘플이 버퍼 `limit` 을 넘겨 읽는 경우를 막는다
+    (읽을 수 있는 샘플 개수로 제한).
+  - 인코더에 chunk 로 나눠 넣을 때 `work` 의 유효 범위를 넘기지 않는다.
+- versionName 3.5.28 / versionCode 89
 
 ## v3.5.27 변경 내용
 - **페이드 실패의 진짜 원인 수정** — `ReadOnlyBufferException`
