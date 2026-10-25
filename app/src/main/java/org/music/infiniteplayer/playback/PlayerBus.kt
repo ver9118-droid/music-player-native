@@ -32,6 +32,7 @@ data class Diagnostics(
     val queueInfo: String = "",
     val selfTest: String = "",
     val carDisplay: String = "",
+    val highlight: String = "",
 )
 
 /** UI 가 보는 재생 상태 (곡 정보/설정 등 자주 안 바뀌는 것들). */

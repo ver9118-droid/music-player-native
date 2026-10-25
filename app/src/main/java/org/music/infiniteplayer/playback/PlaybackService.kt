@@ -124,6 +124,9 @@ class PlaybackService : MediaSessionService() {
     /** 차량 외부 디스플레이 영상 출력 (블루투스 AVRCP 는 메타데이터만 보낼 수 있다) */
     private var carDisplay: CarDisplay? = null
 
+    /** 마지막으로 벨소리를 만든 구간 (진단 행에 표시) */
+    private var lastHighlightInfo = ""
+
     // ── 생애주기 ───────────────────────────────────────────────
     override fun onCreate() {
         super.onCreate()
@@ -969,6 +972,7 @@ class PlaybackService : MediaSessionService() {
                     queueInfo = queue,
                     selfTest = selfTestText,
                     carDisplay = carDisplay?.info() ?: "",
+                    highlight = lastHighlightInfo,
                 )
             )
         }
@@ -1526,28 +1530,25 @@ class PlaybackService : MediaSessionService() {
             //     → 구간을 파일 자체에 넣으면 사운드 선택기를 열지 않아도 그대로 울린다)
             val fade = org.music.infiniteplayer.core.Prefs.ringtoneFade
             var clip = src
-            var window: org.music.infiniteplayer.core.Highlight.Window? = null
             var mime = useAudio.mimeType
+            var cutInfo = "하이라이트 못 찾음 · 곡 전체"
+
             val w = org.music.infiniteplayer.core.Highlight.analyze(src)
             if (w != null) {
                 // 페이드 인/아웃은 **파일 안에** 들어 있어야 한다 — 벨소리는 시스템이 재생하므로
                 // 앱이 음량을 조절할 수 없다. 그래서 페이드를 켠 경우에만 PCM 으로 디코딩해
                 // 게인 램프를 입히고 AAC 로 재인코딩한다 (페이드가 0 이면 샘플 그대로 복사).
-                val outExt = if (fade > 0f) "m4a"
-                else org.music.infiniteplayer.core.MediaSaver.extensionFor(mime)
-                val cut = File(cacheDir, "ringtone_cut.${outExt}")
-                val ok = if (fade > 0f) {
-                    val encoded = org.music.infiniteplayer.core.Highlight.encodeWithFade(
-                        src, cut, w, fade.toDouble(), fade.toDouble(),
-                    )
-                    if (encoded) mime = "audio/mp4a-latm"
-                    encoded
-                } else {
-                    org.music.infiniteplayer.core.Highlight.cut(src, cut, w)
-                }
-                if (ok) {
+                val cut = File(cacheDir, "ringtone_cut.m4a")
+                val r = org.music.infiniteplayer.core.Highlight.render(
+                    src, cut, w, fade.toDouble(), fade.toDouble(),
+                )
+                if (r.ok) {
                     clip = cut
-                    window = w
+                    mime = r.mimeType
+                    val how = if (r.reencoded) "재인코딩" else "샘플 복사"
+                    cutInfo = "${w.label()} · $how"
+                } else {
+                    cutInfo = "${w.label()} · 쓰기 실패 → 곡 전체"
                 }
             }
 
@@ -1580,13 +1581,11 @@ class PlaybackService : MediaSessionService() {
                 name.substringBeforeLast('.').lowercase()
             val applied = alreadySet || setter.setRingtone(this@PlaybackService, saved.uri)
             errorText = ""
+            val fadeText = if (fade > 0f) " · 페이드 ${fade}초" else ""
+            lastHighlightInfo = "$cutInfo$fadeText"
             if (applied) {
                 setManualStatus("벨소리 적용 완료")
-                val where = if (window != null) {
-                    val f = if (fade > 0f) " · 페이드 ${fade}초" else ""
-                    " · 하이라이트 ${window.label()}$f"
-                } else " · 곡 전체"
-                toast("벨소리 적용 완료 · $name$where")
+                toast("벨소리 적용 완료 · $name · $cutInfo$fadeText")
             } else {
                 setManualStatus("벨소리 저장 완료 (권한 필요)")
                 toast("벨소리 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")

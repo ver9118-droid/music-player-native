@@ -42,14 +42,27 @@ object Highlight {
     /** 도입부는 제외한다 (갤럭시도 도입부를 하이라이트로 잡지 않는다) */
     const val INTRO_SECONDS = 12
 
+    /**
+     * 초 단위 음량을 읽는 최대 길이.
+     * 헤더에 길이가 없으므로 실제로 읽힌 마지막 초를 곡 길이로 쓴다.
+     */
+    const val MAX_SCAN_SECONDS = 600
+
     /** 고른 하이라이트 구간 (초) */
     data class Window(val startSec: Int, val endSec: Int) {
         fun label(): String = "${mmss(startSec)} ~ ${mmss(endSec)}"
     }
 
+    /** 구간을 파일에 쓴 결과 (실패 여부 + 실제 포맷) */
+    data class RenderResult(val ok: Boolean, val mimeType: String = "", val reencoded: Boolean = false)
+
     /**
      * 음파 에너지로 하이라이트 구간을 고른다.
      * 실패하면 null (그때는 곡 전체를 그대로 쓴다).
+     *
+     * 유튜브 스트림(fMP4) 은 헤더(mvhd) 에 곡 길이를 적지 않는 경우가 많다.
+     * 그래서 길이를 헤더에서 읽는 데 의존하지 않고, 초 단위 음량을 읽으면서
+     * **실제로 측정된 마지막 초** 를 곡 길이로 쓴다.
      */
     fun analyze(file: File): Window? {
         val extractor = MediaExtractor()
@@ -60,14 +73,18 @@ object Highlight {
             extractor.selectTrack(track)
 
             val format = extractor.getTrackFormat(track)
-            val durationUs = format.getLong(MediaFormat.KEY_DURATION)
-            if (durationUs <= 0) return null
-            val durationSec = (durationUs / 1_000_000L).toInt()
-            if (durationSec <= CLIP_SECONDS + 2) return Window(0, durationSec)
+            val energy = decodeEnergy(extractor, format, MAX_SCAN_SECONDS + 1) ?: return null
 
-            val energy = decodeEnergy(extractor, format, durationSec)
-            if (energy == null) return null
-            return bestWindow(energy)
+            var last = -1
+            for (i in MAX_SCAN_SECONDS downTo 0) {
+                if (energy[i] > 0f) {
+                    last = i
+                    break
+                }
+            }
+            if (last < 0) return null
+            if (last <= CLIP_SECONDS + 2) return Window(0, last + 1)
+            return bestWindow(energy, last + 1)
         } catch (_: Exception) {
             return null
         } finally {
@@ -76,6 +93,25 @@ object Highlight {
             } catch (_: Exception) {
             }
         }
+    }
+
+    /**
+     * 선택한 구간을 out 에 쓴다.
+     *
+     * 페이드가 0 이고 MP4 로 담을 수 있는 포맷이면 재인코딩 없이 샘플을 복사한다
+     * (음질 손실 없음). 그 외(페이드 사용 · MP4 가 받아들이지 않는 포맷) 는
+     * PCM 으로 디코딩해 램프를 입힌 뒤 AAC 로 다시 인코딩한다.
+     */
+    fun render(input: File, out: File, window: Window, fadeInSec: Double, fadeOutSec: Double): RenderResult {
+        val mime = inputMime(input) ?: return RenderResult(false)
+        if (fadeInSec <= 0.0 && fadeOutSec <= 0.0 && muxable(mime)) {
+            if (cut(input, out, window)) return RenderResult(true, mime, false)
+            // 복사가 안 되는 파일 → 아래 재인코딩으로 한 번 더 시도한다
+        }
+        if (encodeWithFade(input, out, window, fadeInSec, fadeOutSec)) {
+            return RenderResult(true, "audio/mp4a-latm", true)
+        }
+        return RenderResult(false, mime, false)
     }
 
     /**
@@ -104,6 +140,19 @@ object Highlight {
             val buffer = ByteBuffer.allocate(1 shl 16)
             val info = MediaCodec.BufferInfo()
 
+            // 오디오 특화 정보(csd) 는 구간 앞에 있어도 먼저 쓴다 — 그래야 파일이 재생된다
+            if (extractor.getSampleFlags() and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                val size = extractor.readSampleData(buffer, 0)
+                if (size > 0) {
+                    info.offset = 0
+                    info.size = size
+                    info.presentationTimeUs = 0
+                    info.flags = MediaCodec.BUFFER_FLAG_CODEC_CONFIG
+                    muxer.writeSampleData(outTrack, buffer, info)
+                }
+                extractor.advance()
+            }
+
             // 구간 앞의 샘플은 건너뛴다
             while (extractor.getSampleTime() < startUs && extractor.advance()) {
             }
@@ -117,7 +166,9 @@ object Highlight {
                 info.offset = 0
                 info.size = size
                 info.presentationTimeUs = time - startUs
-                info.flags = extractor.getSampleFlags() and MediaCodec.BUFFER_FLAG_KEY_FRAME
+                // CODEC_CONFIG(오디오 특화 정보) 를 보존해야 재생되는 파일이 된다
+                info.flags = extractor.getSampleFlags() and
+                    (MediaCodec.BUFFER_FLAG_KEY_FRAME or MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
                 muxer.writeSampleData(outTrack, buffer, info)
                 written++
                 extractor.advance()
@@ -151,8 +202,9 @@ object Highlight {
      */
     fun encodeWithFade(input: File, out: File, window: Window, fadeInSec: Double, fadeOutSec: Double): Boolean {
         // 페이드가 구간 절반보다 길면 램프가 겹치므로 절반으로 제한한다
-        val inSec = fadeInSec.coerceIn(0.0, CLIP_SECONDS / 2.0)
-        val outSec = fadeOutSec.coerceIn(0.0, CLIP_SECONDS / 2.0)
+        val span = max(window.endSec - window.startSec, 1)
+        val inSec = fadeInSec.coerceIn(0.0, span / 2.0)
+        val outSec = fadeOutSec.coerceIn(0.0, span / 2.0)
         if (inSec <= 0.0 && outSec <= 0.0) return cut(input, out, window)
 
         val extractor = MediaExtractor()
@@ -320,6 +372,24 @@ object Highlight {
 
     // ── 내부 ────────────────────────────────────────────────────
 
+    /** 파일의 실제 오디오 포맷 (MediaExtractor 가 읽는 값) */
+    private fun inputMime(file: File): String? {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(file.absolutePath)
+            val track = audioTrack(extractor)
+            if (track < 0) return null
+            return extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME)
+        } catch (_: Exception) {
+            return null
+        } finally {
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     private fun audioTrack(extractor: MediaExtractor): Int {
         for (i in 0 until extractor.trackCount) {
             val mime = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
@@ -387,8 +457,11 @@ object Highlight {
         buffer.order(ByteOrder.BIG_ENDIAN)
     }
 
-    /** 초 단위 음량(RMS) */
-    private fun decodeEnergy(extractor: MediaExtractor, format: MediaFormat, durationSec: Int): FloatArray? {
+    /**
+     * 초 단위 음량(RMS) 을 bins 칸으로 재는다.
+     * 헤더 길이를 신뢰하지 않는다 — 읽힌 마지막 초가 실제 곡 길이이다.
+     */
+    private fun decodeEnergy(extractor: MediaExtractor, format: MediaFormat, bins: Int): FloatArray? {
         val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
         var codec: MediaCodec? = null
         try {
@@ -396,8 +469,8 @@ object Highlight {
             codec.configure(format, null, null, 0)
             codec.start()
 
-            val sum = DoubleArray(durationSec + 1)
-            val count = IntArray(durationSec + 1)
+            val sum = DoubleArray(bins)
+            val count = IntArray(bins)
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var guard = 0
@@ -421,7 +494,7 @@ object Highlight {
                 val outIndex = codec.dequeueOutputBuffer(info, 10_000)
                 if (outIndex >= 0) {
                     if (info.size > 0) {
-                        codec.getOutputBuffer(outIndex)?.let { addEnergy(sum, count, it, info, durationSec) }
+                        codec.getOutputBuffer(outIndex)?.let { addEnergy(sum, count, it, info, bins) }
                     }
                     codec.releaseOutputBuffer(outIndex, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
@@ -430,9 +503,9 @@ object Highlight {
                 }
             }
 
-            val energy = FloatArray(durationSec + 1)
+            val energy = FloatArray(bins)
             var seen = false
-            for (i in 0..durationSec) {
+            for (i in 0 until bins) {
                 if (count[i] > 0) {
                     energy[i] = sqrt(sum[i] / count[i]).toFloat()
                     seen = true
@@ -459,17 +532,22 @@ object Highlight {
         count: IntArray,
         buffer: ByteBuffer,
         info: MediaCodec.BufferInfo,
-        durationSec: Int,
+        bins: Int,
     ) {
-        buffer.position(info.offset)
-        val bin = (info.presentationTimeUs / 1_000_000L).toInt().coerceIn(0, durationSec)
+        val bin = (info.presentationTimeUs / 1_000_000L).toInt()
+        if (bin < 0 || bin >= bins) return
         val samples = info.size / 2
         if (samples <= 0) return
+
+        // MediaCodec 의 PCM 은 16bit little-endian 이다
+        buffer.position(info.offset)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
         var local = 0.0
         for (i in 0 until samples) {
             val s = buffer.short.toDouble()
             local += s * s
         }
+        buffer.order(ByteOrder.BIG_ENDIAN)
         sum[bin] += local
         count[bin] += samples
     }
@@ -482,8 +560,8 @@ object Highlight {
      *   · 중간에 조용한 틈이 없는지 — 벨소리로 울릴 때 끊기지 않게
      *   · 시작점의 자연스러움        — 직전 초가 조용하면 절의 시작점으로 본다
      */
-    private fun bestWindow(energy: FloatArray): Window {
-        val n = energy.size
+    private fun bestWindow(energy: FloatArray, measuredSec: Int): Window {
+        val n = min(energy.size, max(1, measuredSec))
         val w = min(CLIP_SECONDS, n)
         val peak = energy.maxOrNull() ?: return Window(0, w)
         if (peak <= 0f) return Window(0, w)
