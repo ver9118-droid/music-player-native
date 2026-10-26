@@ -1807,7 +1807,7 @@ private fun ActionChips(
             icon = Icons.Rounded.Notifications,
         ) { onRingtone() }
         SmallChip(
-            text = "관리",
+            text = "저장함",
             selected = false,
             icon = AppIcons.FolderOpen,
         ) { onOpenLibrary() }
