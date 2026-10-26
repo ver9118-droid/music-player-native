@@ -1409,29 +1409,23 @@ class PlaybackService : MediaSessionService() {
     }
 
     /**
-     * 현재 곡을 벨소리로 저장하고, 바로 기본 벨소리로 적용한다.
+     * 현재 곡을 **벨소리 파일로 저장만** 한다 (시스템 기본 벨소리로는 바꾸지 않는다).
      *
      *  1) AAC(m4a) 스트림을 내려받는다 (다운로드 버튼과 같은 경로)
      *  2) 갤럭시처럼 **하이라이트 구간을 앱이 직접 찾아** 그 부분만 잘라낸다
      *     (삼성은 하이라이트를 자기 데이터베이스에 저장하고 밖으로 바꿔 주는 API 가 없다
      *      → 구간을 파일 자체에 넣으면 사운드 선택기를 열지 않아도 그대로 재생된다)
      *  3) MediaStore 에 "곡명 (벨소리).m4a" 로 저장 (이미 있는 행은 재사용)
-     *  4) RingtoneSetter 로 시스템 기본 벨소리에 바로 설정한다
+     *
+     * 적용은 저장함의 "벨소리 적용" 버튼에서만 한다 (applySavedRingtone).
+     * 그래서 이 경로에서는 "시스템 설정에 쓰기" 권한이 필요 없다.
      *
      * 분석이나 잘라내기가 실패하면 곡 전체를 그대로 저장한다.
-     *
-     * "시스템 설정에 쓰기" 권한이 없으면 권한 화면을 열고 토스트로 안내한다.
      */
     fun setAsRingtone() {
         val entry = currentEntry
         if (entry == null) {
             toast("재생 중인 곡이 없습니다")
-            return
-        }
-        downloadKind = "ringtone"
-        if (!org.music.infiniteplayer.core.RingtoneSetter.canWriteSettings(this)) {
-            toast("${kindWord()} 권한이 없습니다 · 시스템 설정 권한을 허용해 주세요")
-            org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this)
             return
         }
         scope.launch {
@@ -1546,39 +1540,26 @@ class PlaybackService : MediaSessionService() {
                 return@launch
             }
 
-            // 이미 같은 파일이 기본 벨소리로 걸려 있으면 다시 설정하지 않는다.
-            // → 같은 곡인지 는 URI/파일 경로 + 파일명 두 가지로 비교한다
-            //   (이전 버전이 만들어 둔 음악 폴더 사본과 루트 Ringtones 는 URI 가 달라서
-            //    파일명으로 한 번 더 비교해야 같은 곡을 다시 설정하지 않는다)
+            // 저장만 한다 — 기본 벨소리로 바꾸는 것은 저장함의 "벨소리 적용" 버튼에서만.
+            // (저장할 때마다 시스템 기본 벨소리가 바뀌지 않게 하기 위함)
+            errorText = ""
+            // 저장 파일 목록에서 아티스트를 보여 주기 위해 기록해 둔다 (m4a 에는 태그가 없다)
             org.music.infiniteplayer.core.SavedMeta.put(
                 this@PlaybackService, name, entry.track.title, entry.track.artist,
             )
-            val setter = org.music.infiniteplayer.core.RingtoneSetter
-            val alreadySet = setter.isSameRingtone(
-                this@PlaybackService, setter.currentRingtoneUri(this@PlaybackService), saved.uri,
-            ) || setter.currentRingtoneFileName(this@PlaybackService) ==
-                name.substringBeforeLast('.').lowercase()
-            val applied = alreadySet || setter.setRingtone(this@PlaybackService, saved.uri)
-            errorText = ""
-            if (applied) {
-                setManualStatus("${kindWord()} 적용 완료")
-                val where = if (window != null) {
-                    val f = if (fade > 0f) " · 페이드 ${fade}초" else ""
-                    " · 하이라이트 ${window.label()}$f"
-                } else if (fadeFail.isNotBlank()) {
-                    // 하이라이트는 찾았지만 페이드 인코딩이 실패했다 → 이유를 표시한다
-                    // (토스트는 두 줄에서 잘리므로 파일명을 빼서 이유가 보이게 한다)
-                    " · 곡 전체 (페이드 실패: $fadeFail)"
-                } else " · 곡 전체"
-                if (window == null && fadeFail.isNotBlank()) {
-                    toast("${kindWord()} 적용 완료 ·$where")
-                } else {
-                    toast("${kindWord()} 적용 완료 · $name$where")
-                }
+            setManualStatus("${kindWord()} 완료")
+            val where = if (window != null) {
+                val f = if (fade > 0f) " · 페이드 ${fade}초" else ""
+                " · 하이라이트 ${window.label()}$f"
+            } else if (fadeFail.isNotBlank()) {
+                // 하이라이트는 찾았지만 페이드 인코딩이 실패했다 → 이유를 표시한다
+                // (토스트는 두 줄에서 잘리므로 파일명을 빼서 이유가 보이게 한다)
+                " · 곡 전체 (페이드 실패: $fadeFail)"
+            } else " · 곡 전체"
+            if (window == null && fadeFail.isNotBlank()) {
+                toast("${kindWord()} 완료 ·$where")
             } else {
-                setManualStatus("${kindWord()} 저장 완료 (권한 필요)")
-                toast("${kindWord()} 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")
-                org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this@PlaybackService)
+                toast("${kindWord()} 완료 · $name$where")
             }
             publish()
         }
