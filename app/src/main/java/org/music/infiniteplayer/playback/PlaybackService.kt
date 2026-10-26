@@ -67,6 +67,8 @@ class PlaybackService : MediaSessionService() {
         @Volatile var thumb: File? = null
         @Volatile var job: Deferred<ResolvedAudio?>? = null
         @Volatile var localFile: File? = null
+        /** 기기에 저장된 파일(라이브러리)에서 재생할 때의 URI — 유튜브 해석 없이 바로 재생 */
+        @Volatile var savedUri: Uri? = null
     }
 
     private val entries = ArrayList<Entry>()
@@ -110,10 +112,15 @@ class PlaybackService : MediaSessionService() {
     private var selfTestRunning = false
     private var retryCount = 0
     private var downloadProgress = -1
+    private var downloadKind = "music"   // 뮤직다운 / 벨소리다운 (문구 통일용)
+    private var libraryTick = 0           // 저장 목록 변경 → 라이브러리 화면 다시 읽기
     private var preparing = false
     private var lastState = PlayerState()
     private var toastText = ""
     private var toastId = 0L
+
+    /** 뮤직다운 / 벨소리다운 — 진행·실패·완료 문구를 한 단어로 통일한다 */
+    private fun kindWord() = if (downloadKind == "ringtone") "벨소리다운" else "뮤직다운"
 
     private var repeatMode = "all"
     private var infinite = true
@@ -150,7 +157,7 @@ class PlaybackService : MediaSessionService() {
             // 닫힌 Range 를 보내는 커스텀 DataSource 를 사용한다.
             .setMediaSourceFactory(
                 androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this)
-                    .setDataSourceFactory(org.music.infiniteplayer.core.RangeDataSource.Factory())
+                    .setDataSourceFactory(org.music.infiniteplayer.core.RangeDataSource.Factory(this))
             )
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -169,6 +176,8 @@ class PlaybackService : MediaSessionService() {
         applyPlayerRepeat()
 
         mediaSession = MediaSession.Builder(this, exo)
+            // 차량/블루투스가 같은 세션을 계속 인식하도록 고정 ID 를 준다
+            .setId("infinite-player")
             .setSessionActivity(openAppIntent())
             .build()
 
@@ -184,9 +193,14 @@ class PlaybackService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // 앱을 최근 목록에서 밀어내더라도 서비스를 죽이지 않는다.
-        //  - 활성 세션(UI 의 MediaController 연결)이면 Media3 가 유지한다
-        //  - 비활성이어도 재생 중이면 반드시 유지한다
-        if (player?.isPlaying == true) return
+        //  - 차량/블루투스가 연결해 둔 세션이 있으면 유지 (AVRCP 제어가 끊기지 않게)
+        //  - 재생 중이면 반드시 유지
+        val sessionActive = try {
+            mediaSession?.connectedControllers?.isNotEmpty() == true
+        } catch (_: Exception) {
+            false
+        }
+        if (sessionActive || player?.isPlaying == true) return
         super.onTaskRemoved(rootIntent)
     }
 
@@ -605,6 +619,25 @@ class PlaybackService : MediaSessionService() {
         prefer: List<Int>? = null,
         useCache: Boolean = true,
     ): ResolvedAudio? {
+        // 기기에 저장된 파일(라이브러리) → 유튜브 해석 없이 URI 를 그대로 쓴다
+        entry.savedUri?.let { uri ->
+            val mime = try {
+                contentResolver.getType(uri) ?: "audio/*"
+            } catch (_: Exception) {
+                "audio/*"
+            }
+            val audio = ResolvedAudio(
+                videoId = "",
+                url = uri.toString(),
+                mimeType = mime,
+                itag = 0,
+                durationMs = entry.track.durationMs,
+                title = entry.track.title,
+                artist = entry.track.artist,
+            )
+            entry.audio = audio
+            return audio
+        }
         entry.audio?.let { return it }
         if (useCache) {
             audioCache[entry.track.id]?.let {
@@ -702,7 +735,11 @@ class PlaybackService : MediaSessionService() {
         entry.thumb?.let { md.setArtworkUri(Uri.fromFile(it)) }
         // 로컬로 내려받은 파일이 있으면 그걸 재생 (직접 스트리밍 실패 대비)
         val local = entry.localFile
-        val uri = if (local != null && local.exists()) Uri.fromFile(local) else Uri.parse(audio.url)
+        val uri = when {
+            entry.savedUri != null -> entry.savedUri!!
+            local != null && local.exists() -> Uri.fromFile(local)
+            else -> Uri.parse(audio.url)
+        }
         return MediaItem.Builder()
             .setUri(uri)
             .setMediaId(entry.track.id)
@@ -810,8 +847,10 @@ class PlaybackService : MediaSessionService() {
             error = errorText,
             callActive = callPaused,
             downloadProgress = downloadProgress,
+            downloadKind = downloadKind,
             toast = toastText,
             toastId = toastId,
+            libraryTick = libraryTick,
         )
         // 실제로 바뀔 때만 알린다 (홈 화면 불필요한 재생성 방지)
         if (next != lastState) {
@@ -1309,16 +1348,17 @@ class PlaybackService : MediaSessionService() {
             return
         }
         scope.launch {
+            downloadKind = "music"
             val dest = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
             downloadProgress = 0
-            setManualStatus("내려받는 중...")
+            setManualStatus("${kindWord()} 중...")
             // 주소는 IP 로 서명되어 있어 모바일 환경에서 오래되면 403 이 된다.
             // → 실패하면 새 주소로 받아 즉시 한 번 더 시도한다.
             var audio = resolveForFile(entry)
             if (audio == null) {
                 errorText = "스트림 주소를 얻지 못했습니다"
                 clearManualStatus()
-                toast("다운로드 실패: 스트림 주소를 얻지 못했습니다")
+                toast("${kindWord()} 실패: 스트림 주소를 얻지 못했습니다")
                 publish()
                 return@launch
             }
@@ -1340,9 +1380,9 @@ class PlaybackService : MediaSessionService() {
             downloadProgress = -1
             val useAudio = audio
             if (!res.ok || useAudio == null) {
-                errorText = "다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
+                errorText = "${kindWord()} 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
                 clearManualStatus()
-                toast("다운로드 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
+                toast("${kindWord()} 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
                 publish()
                 return@launch
             }
@@ -1351,15 +1391,15 @@ class PlaybackService : MediaSessionService() {
                 this@PlaybackService, dest, name, useAudio.mimeType,
             )
             if (saved.uri == null) {
-                errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
+                errorText = "${kindWord()} 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
                 clearManualStatus()
-                toast("저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
+                toast("${kindWord()} 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
                 publish()
                 return@launch
             }
             errorText = ""
-            setManualStatus("다운로드 완료")
-            toast("다운로드 완료 · $name")
+            setManualStatus("${kindWord()} 완료")
+            toast("${kindWord()} 완료 · $name")
             publish()
         }
     }
@@ -1384,21 +1424,23 @@ class PlaybackService : MediaSessionService() {
             toast("재생 중인 곡이 없습니다")
             return
         }
+        downloadKind = "ringtone"
         if (!org.music.infiniteplayer.core.RingtoneSetter.canWriteSettings(this)) {
-            toast("벨소리 권한이 없습니다 · 시스템 설정 권한을 허용해 주세요")
+            toast("${kindWord()} 권한이 없습니다 · 시스템 설정 권한을 허용해 주세요")
             org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this)
             return
         }
         scope.launch {
+            downloadKind = "ringtone"
             val src = File(cacheDir, "dl_${entry.track.id.hashCode()}.m4a")
             downloadProgress = 0
-            setManualStatus("벨소리 저장 중...")
+            setManualStatus("${kindWord()} 중...")
 
             var audio = resolveForFile(entry)
             if (audio == null) {
                 errorText = "스트림 주소를 얻지 못했습니다"
                 clearManualStatus()
-                toast("벨소리 실패: 스트림 주소를 얻지 못했습니다")
+                toast("${kindWord()} 실패: 스트림 주소를 얻지 못했습니다")
                 publish()
                 return@launch
             }
@@ -1420,9 +1462,9 @@ class PlaybackService : MediaSessionService() {
             downloadProgress = -1
             val useAudio = audio
             if (!res.ok || useAudio == null) {
-                errorText = "벨소리 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
+                errorText = "${kindWord()} 실패: ${res.error.ifBlank { "알 수 없는 오류" }}"
                 clearManualStatus()
-                toast("벨소리 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
+                toast("${kindWord()} 실패: ${res.error.ifBlank { "알 수 없는 오류" }}")
                 publish()
                 return@launch
             }
@@ -1493,9 +1535,9 @@ class PlaybackService : MediaSessionService() {
                 this@PlaybackService, clip, name, mime,
             )
             if (saved.uri == null) {
-                errorText = "저장 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
+                errorText = "${kindWord()} 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}"
                 clearManualStatus()
-                toast("벨소리 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
+                toast("${kindWord()} 실패: ${saved.error.ifBlank { "알 수 없는 오류" }}")
                 publish()
                 return@launch
             }
@@ -1512,7 +1554,7 @@ class PlaybackService : MediaSessionService() {
             val applied = alreadySet || setter.setRingtone(this@PlaybackService, saved.uri)
             errorText = ""
             if (applied) {
-                setManualStatus("벨소리 적용 완료")
+                setManualStatus("${kindWord()} 적용 완료")
                 val where = if (window != null) {
                     val f = if (fade > 0f) " · 페이드 ${fade}초" else ""
                     " · 하이라이트 ${window.label()}$f"
@@ -1522,19 +1564,83 @@ class PlaybackService : MediaSessionService() {
                     " · 곡 전체 (페이드 실패: $fadeFail)"
                 } else " · 곡 전체"
                 if (window == null && fadeFail.isNotBlank()) {
-                    toast("벨소리 적용 완료 ·$where")
+                    toast("${kindWord()} 적용 완료 ·$where")
                 } else {
-                    toast("벨소리 적용 완료 · $name$where")
+                    toast("${kindWord()} 적용 완료 · $name$where")
                 }
             } else {
-                setManualStatus("벨소리 저장 완료 (권한 필요)")
-                toast("벨소리 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")
+                setManualStatus("${kindWord()} 저장 완료 (권한 필요)")
+                toast("${kindWord()} 저장 완료 · $name · 권한이 없어 적용은 실패했습니다")
                 org.music.infiniteplayer.core.RingtoneSetter.openWriteSettingsPage(this@PlaybackService)
             }
             publish()
         }
     }
 
+    // ── 저장된 파일(라이브러리) 관리 ─────────────────────────────
+    /**
+     * 기기에 저장된 파일을 바로 재생한다.
+     * 유튜브 해석 없이 MediaStore URI 를 그대로 재생하므로 즉시 시작된다.
+     */
+    fun playSavedUri(item: org.music.infiniteplayer.core.LibraryIndex.SavedItem) {
+        val track = Track(
+            id = item.uri.toString(),
+            title = item.title.ifBlank { item.name.substringBeforeLast('.') },
+            artist = item.artist,
+            source = "library",
+            durationMs = item.durationMs,
+        )
+        entries.clear()
+        val entry = Entry(track)
+        entry.savedUri = item.uri
+        entries.add(entry)
+        order.clear()
+        order.add(0)
+        windowStart = 0
+        jumpTo(0, autoPlay = true)
+    }
+
+    /** 저장된 파일(벨소리 폴더의 곡 포함)을 기본 벨소리로 적용한다. */
+    fun applySavedRingtone(item: org.music.infiniteplayer.core.LibraryIndex.SavedItem) {
+        val setter = org.music.infiniteplayer.core.RingtoneSetter
+        if (!setter.canWriteSettings(this)) {
+            toast("벨소리 권한이 없습니다 · 시스템 설정 권한을 허용해 주세요")
+            setter.openWriteSettingsPage(this)
+            return
+        }
+        // 이미 같은 파일이 걸려 있으면 다시 설정하지 않는다 (파일명으로도 비교)
+        val same = setter.isSameRingtone(this, setter.currentRingtoneUri(this), item.uri) ||
+                setter.currentRingtoneFileName(this) == item.name.substringBeforeLast('.').lowercase()
+        val ok = same || setter.setRingtone(this, item.uri)
+        libraryTick++
+        if (ok) {
+            toast("벨소리 적용 완료 · ${item.name}")
+        } else {
+            toast("벨소리 적용 실패 · 시스템 설정 권한을 확인해 주세요")
+            setter.openWriteSettingsPage(this)
+        }
+        publish()
+    }
+
+    /** 저장된 파일 삭제 — 이 앱이 만든 파일만 지운다 (사용자 파일 보호) */
+    fun deleteSavedItem(item: org.music.infiniteplayer.core.LibraryIndex.SavedItem) {
+        if (!item.appOwned) {
+            toast("다른 앱이 만든 파일은 삭제할 수 없습니다")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            val ok = org.music.infiniteplayer.core.LibraryIndex.delete(this@PlaybackService, item)
+            libraryTick++
+            if (ok) toast("삭제 완료 · ${item.name}")
+            else toast("삭제 실패 · 파일이 이미 없거나 권한이 없습니다")
+        }
+    }
+
+    /** 파일이 들어 있는 폴더를 연다. */
+    fun openSavedFolder(item: org.music.infiniteplayer.core.LibraryIndex.SavedItem) {
+        val fallback = org.music.infiniteplayer.core.LibraryIndex.openFolder(this, item.folder)
+        if (fallback.isNotBlank()) toast("폴더: $fallback")
+    }
 
     /** 파일명 (확장자는 실제 포맷에 맞춘다) */
     private fun safeFileName(track: Track, mimeType: String): String {

@@ -49,25 +49,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.LockOpen
-import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Repeat
-import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Shuffle
-import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.rounded.SkipPrevious
-import androidx.compose.material.icons.rounded.VolumeDown
-import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -121,9 +110,14 @@ import org.music.infiniteplayer.data.Source
 import org.music.infiniteplayer.data.Sources
 import org.music.infiniteplayer.data.Track
 import org.music.infiniteplayer.core.Storage
+import org.music.infiniteplayer.core.LibraryIndex
 import org.music.infiniteplayer.playback.Diagnostics
 import org.music.infiniteplayer.playback.PlaybackTick
 import org.music.infiniteplayer.playback.PlayerState
+
+/** 뮤직다운 / 벨소리다운 문구 (서비스의 kindWord 와 같은 규칙) */
+private fun kindWord(state: PlayerState): String =
+    if (state.downloadKind == "ringtone") "벨소리다운" else "뮤직다운"
 
 // ─────────────────────────────────────────────────────────────
 // 홈 화면
@@ -558,7 +552,7 @@ fun FavoritesScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            Icons.Rounded.Shuffle,
+                            AppIcons.Shuffle,
                             null,
                             tint = TextPrimary,
                             modifier = Modifier.size(18.dp),
@@ -594,6 +588,255 @@ fun FavoritesScreen(
             }
         }
     }
+}
+
+/**
+ * 저장한 파일 관리 화면 (뮤직다운 / 벨소리다운).
+ *
+ * 파일 목록에서 바로 재생하거나 기본 벨소리로 적용하고,
+ * 앱이 만든 파일은 삭제할 수 있다. "폴더 열기" 로 파일 관리자에서 위치를 확인한다.
+ */
+@Composable
+fun LibraryScreen(
+    state: PlayerState,
+    onBack: () -> Unit,
+    onPlay: (LibraryIndex.SavedItem) -> Unit,
+    onApplyRingtone: (LibraryIndex.SavedItem) -> Unit,
+    onDelete: (LibraryIndex.SavedItem) -> Unit,
+    onOpenFolder: (LibraryIndex.SavedItem) -> Unit,
+) {
+    val context = LocalContext.current
+    var items by remember { mutableStateOf<List<LibraryIndex.SavedItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var confirm by remember { mutableStateOf<LibraryIndex.SavedItem?>(null) }
+
+    // 화면을 열 때 / 목록이 바뀔 때(삭제·벨소리 적용) 다시 읽는다.
+    // MediaStore 조회는 느리므로 IO 스레드에서 한다.
+    LaunchedEffect(state.libraryTick) {
+        loading = items.isEmpty()
+        items = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            LibraryIndex.scan(context)
+        }
+        loading = false
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg),
+    ) {
+        // 헤더
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 6.dp, end = 16.dp, top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Rounded.ArrowBack, "뒤로", tint = TextPrimary)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "저장한 파일",
+                    color = TextPrimary,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "뮤직다운 · 벨소리다운 · ${items.size}개",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
+        }
+
+        when {
+            loading && items.isEmpty() -> {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Spacer(Modifier.height(60.dp))
+                    CircularProgressIndicator(color = Accent, strokeWidth = 2.dp)
+                    Spacer(Modifier.height(12.dp))
+                    Text("저장한 파일을 불러오는 중...", color = TextSecondary, fontSize = 13.sp)
+                }
+            }
+
+            items.isEmpty() -> {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 26.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Spacer(Modifier.height(54.dp))
+                    Icon(
+                        AppIcons.FolderOpen,
+                        null,
+                        tint = Accent.copy(alpha = 0.55f),
+                        modifier = Modifier.size(44.dp),
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        "아직 저장한 파일이 없어요",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "재생 화면에서 뮤직다운 · 벨소리다운을 누르면\n여기에 모입니다.",
+                        color = TextSecondary,
+                        fontSize = 12.5.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+
+            else -> {
+                Text(
+                    "파일을 누르지 않아도 아래 버튼으로 바로 실행할 수 있어요",
+                    color = TextSecondary,
+                    fontSize = 11.5.sp,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
+                )
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        top = 4.dp, bottom = 16.dp,
+                    ),
+                ) {
+                    items(items, key = { it.uri.toString() }) { item ->
+                        LibraryRow(
+                            item = item,
+                            playing = state.playing &&
+                                    state.track?.id == item.uri.toString(),
+                            onPlay = { onPlay(item) },
+                            onApplyRingtone = { onApplyRingtone(item) },
+                            onDelete = { confirm = item },
+                            onOpenFolder = { onOpenFolder(item) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // 삭제는 파일이 완전히 지워지므로 한 번 확인한다
+    confirm?.let { target ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = {
+                Text(
+                    "파일 삭제",
+                    color = TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    "'${target.name}' 을(를) 기기에서 삭제할까요?",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirm = null
+                    onDelete(target)
+                }) {
+                    Text("삭제", color = Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirm = null }) {
+                    Text("취소", color = TextSecondary)
+                }
+            },
+            containerColor = Surface2,
+        )
+    }
+}
+
+@Composable
+private fun LibraryRow(
+    item: LibraryIndex.SavedItem,
+    playing: Boolean,
+    onPlay: () -> Unit,
+    onApplyRingtone: () -> Unit,
+    onDelete: () -> Unit,
+    onOpenFolder: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (playing) Accent.copy(alpha = 0.14f) else Surface1)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    item.title,
+                    color = if (playing) Accent else TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    librarySubtitle(item),
+                    color = TextSecondary,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (item.ringtone) {
+                Text(
+                    "벨소리",
+                    color = Accent,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Accent.copy(alpha = 0.16f))
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SmallChip("재생", playing, Icons.Rounded.PlayArrow) { onPlay() }
+            SmallChip("벨소리 적용", false, Icons.Rounded.Notifications) { onApplyRingtone() }
+            if (item.appOwned) {
+                SmallChip("삭제", false, Icons.Rounded.Delete) { onDelete() }
+            }
+            SmallChip("폴더 열기", false, AppIcons.FolderOpen) { onOpenFolder() }
+        }
+    }
+}
+
+/** 크기 · 아티스트 · 폴더 한 줄 요약 */
+private fun librarySubtitle(item: LibraryIndex.SavedItem): String {
+    val size = when {
+        item.size >= 1024L * 1024L -> "%.1f MB".format(item.size / (1024f * 1024f))
+        item.size >= 1024L -> "%d KB".format(item.size / 1024L)
+        else -> "${item.size} B"
+    }
+    val who = item.artist.ifBlank { "기기 저장" }
+    return "$who · $size · ${item.folder.ifBlank { "기본 폴더" }}"
 }
 
 /** 통합 검색 입력창 */
@@ -752,7 +995,7 @@ private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit) {
             )
         }
         RoundIconButton(
-            icon = if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            icon = if (state.playing) AppIcons.Pause else Icons.Rounded.PlayArrow,
             contentDescription = if (state.playing) "일시정지" else "재생",
             size = 40.dp,
             iconSize = 20.dp,
@@ -762,7 +1005,7 @@ private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit) {
         )
         Spacer(Modifier.width(6.dp))
         RoundIconButton(
-            icon = Icons.Rounded.SkipNext,
+            icon = AppIcons.SkipNext,
             contentDescription = "다음 곡",
             size = 40.dp,
             iconSize = 20.dp,
@@ -784,6 +1027,7 @@ fun NowPlayingScreen(
     onRetry: () -> Unit,
     onDownload: () -> Unit,
     onRingtone: () -> Unit,
+    onOpenLibrary: () -> Unit,
     onRaiseVolume: () -> Unit,
     onBack: () -> Unit,
     onTogglePlay: () -> Unit,
@@ -917,6 +1161,7 @@ fun NowPlayingScreen(
                 onRetry = onRetry,
                 onDownload = onDownload,
                 onRingtone = onRingtone,
+                onOpenLibrary = onOpenLibrary,
                 onRaiseVolume = onRaiseVolume,
                 onTogglePlay = onTogglePlay,
                 onNext = onNext,
@@ -994,6 +1239,7 @@ fun NowPlayingScreen(
                                 onRetry = onRetry,
                                 onDownload = onDownload,
                                 onRingtone = onRingtone,
+                                onOpenLibrary = onOpenLibrary,
                                 onRaiseVolume = onRaiseVolume,
                                 onTogglePlay = onTogglePlay,
                                 onNext = onNext,
@@ -1053,7 +1299,7 @@ private fun PlayerTopBar(
         // 화면 방향 잠금: 켜두면 휴대폰을 돌려도 화면이 바뀌지 않는다
         IconButton(onClick = onToggleOrientationLock) {
             Icon(
-                if (orientationLocked) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                if (orientationLocked) Icons.Rounded.Lock else AppIcons.LockOpen,
                 contentDescription = if (orientationLocked) "화면 방향 잠금 해제" else "화면 방향 잠금",
                 tint = if (orientationLocked) Accent else TextSecondary,
             )
@@ -1144,6 +1390,7 @@ private fun PlayerDetails(
     onRetry: () -> Unit,
     onDownload: () -> Unit,
     onRingtone: () -> Unit,
+    onOpenLibrary: () -> Unit,
     onRaiseVolume: () -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
@@ -1194,6 +1441,7 @@ private fun PlayerDetails(
         state = state,
         onDownload = onDownload,
         onRingtone = onRingtone,
+        onOpenLibrary = onOpenLibrary,
     )
 
     Spacer(Modifier.height(if (compact) 6.dp else 10.dp))
@@ -1201,7 +1449,7 @@ private fun PlayerDetails(
     // 재생 컨트롤
     EvenRow {
         RoundIconButton(
-            icon = Icons.Rounded.Shuffle,
+            icon = AppIcons.Shuffle,
             contentDescription = "셔플",
             size = 42.dp,
             iconSize = 19.dp,
@@ -1210,14 +1458,14 @@ private fun PlayerDetails(
             onClick = { onShuffle(!state.shuffle) },
         )
         RoundIconButton(
-            icon = Icons.Rounded.SkipPrevious,
+            icon = AppIcons.SkipPrevious,
             contentDescription = "이전 곡",
             size = 54.dp,
             iconSize = 30.dp,
             onClick = onPrev,
         )
         RoundIconButton(
-            icon = if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            icon = if (state.playing) AppIcons.Pause else Icons.Rounded.PlayArrow,
             contentDescription = if (state.playing) "일시정지" else "재생",
             size = 68.dp,
             iconSize = 36.dp,
@@ -1226,14 +1474,14 @@ private fun PlayerDetails(
             onClick = onTogglePlay,
         )
         RoundIconButton(
-            icon = Icons.Rounded.SkipNext,
+            icon = AppIcons.SkipNext,
             contentDescription = "다음 곡",
             size = 54.dp,
             iconSize = 30.dp,
             onClick = onNext,
         )
         RoundIconButton(
-            icon = if (state.repeat == "one") Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+            icon = if (state.repeat == "one") AppIcons.RepeatOne else AppIcons.Repeat,
             contentDescription = "반복",
             size = 42.dp,
             iconSize = 19.dp,
@@ -1325,7 +1573,7 @@ private fun PlayerDetails(
                     ) {
                         Text(
                             text = if (state.downloadProgress >= 0)
-                                "내려받는 중 ${state.downloadProgress}%" else "파일로 받기",
+                                "${kindWord(state)} ${state.downloadProgress}%" else kindWord(state),
                             color = TextSecondary,
                             fontSize = 12.5.sp,
                             fontWeight = FontWeight.Medium,
@@ -1453,7 +1701,7 @@ fun DiagnosticsScreen(
                     DiagRow("최근 크래시", if (crash.isBlank()) "없음" else "있음 (아래에서 복사)")
                     DiagRow("스택 덤프", if (stackDump.isBlank()) "없음" else "있음 (아래에서 복사)")
                     if (state.downloadProgress >= 0) {
-                        DiagRow("다운로드", "${state.downloadProgress}%")
+                        DiagRow(kindWord(state), "${state.downloadProgress}%")
                     }
                 }
             }
@@ -1461,7 +1709,7 @@ fun DiagnosticsScreen(
                 Column(Modifier.padding(horizontal = 18.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ActionButton("다시 시도", Accent, Color.White, onRetry)
-                        ActionButton("파일로 받기", Surface2, TextPrimary, onDownload)
+                        ActionButton("뮤직다운", Surface2, TextPrimary, onDownload)
                     }
                     Spacer(Modifier.height(10.dp))
                     ActionButton("진단 내용 복사", Surface2, TextPrimary) {
@@ -1532,6 +1780,7 @@ private fun ActionChips(
     state: PlayerState,
     onDownload: () -> Unit,
     onRingtone: () -> Unit,
+    onOpenLibrary: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -1541,15 +1790,22 @@ private fun ActionChips(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SmallChip(
-            text = if (state.downloadProgress >= 0) "내려받는 중 ${state.downloadProgress}%" else "다운로드",
+            text = if (state.downloadProgress >= 0 && state.downloadKind == "music")
+                "뮤직다운 ${state.downloadProgress}%" else "뮤직다운",
             selected = false,
-            icon = Icons.Rounded.Download,
+            icon = AppIcons.Download,
         ) { onDownload() }
         SmallChip(
-            text = "벨소리",
+            text = if (state.downloadProgress >= 0 && state.downloadKind == "ringtone")
+                "벨소리다운 ${state.downloadProgress}%" else "벨소리다운",
             selected = false,
             icon = Icons.Rounded.Notifications,
         ) { onRingtone() }
+        SmallChip(
+            text = "관리",
+            selected = false,
+            icon = AppIcons.FolderOpen,
+        ) { onOpenLibrary() }
     }
 }
 
@@ -1764,7 +2020,7 @@ fun SettingsScreen(
                 SectionTitle("음향")
                 Column(Modifier.padding(horizontal = 18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.VolumeDown, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(AppIcons.VolumeDown, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
                         Slider(
                             value = state.volume,
                             onValueChange = onVolume,
@@ -1775,7 +2031,7 @@ fun SettingsScreen(
                                 inactiveTrackColor = Surface2,
                             ),
                         )
-                        Icon(Icons.Rounded.VolumeUp, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                        Icon(AppIcons.VolumeUp, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
                     }
                 }
                 SettingRow(

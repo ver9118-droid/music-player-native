@@ -35,6 +35,7 @@ private const val PAGE_PLAYER = 1
 private const val PAGE_SETTINGS = 2
 private const val PAGE_DIAG = 3
 private const val PAGE_FAVORITES = 4
+private const val PAGE_LIBRARY = 5
 
 @Composable
 fun RootScreen() {
@@ -54,11 +55,6 @@ fun RootScreen() {
     var quality by remember { mutableStateOf(Prefs.quality) }
     var ringtoneFade by remember { mutableStateOf(Prefs.ringtoneFade) }
     var favorites by remember { mutableStateOf(loadFavorites()) }
-    var crashLog by remember { mutableStateOf(org.music.infiniteplayer.core.CrashLog.read()) }
-    // 지난 실행에서 멈춤이 감지됐는지 (감시자 기록)
-    var freezeDetected by remember {
-        mutableStateOf(org.music.infiniteplayer.core.CrashLog.readStack().contains("멈춤 감지"))
-    }
 
     // ── 통합 검색 ────────────────────────────────────────────
     var searchQuery by remember { mutableStateOf("") }
@@ -184,6 +180,7 @@ fun RootScreen() {
                 onRetry = { PlayerBus.post { it.retryCurrent() } },
                 onDownload = { PlayerBus.post { it.downloadToDevice() } },
                 onRingtone = { PlayerBus.post { it.setAsRingtone() } },
+                onOpenLibrary = { page = PAGE_LIBRARY },
                 onRaiseVolume = { PlayerBus.post { it.raiseSystemVolume() } },
                 onBack = { page = PAGE_HOME },
                 onTogglePlay = { PlayerBus.post { it.toggle() } },
@@ -237,6 +234,18 @@ fun RootScreen() {
                 onShufflePlay = playFavoritesShuffled,
                 onRemoveFavorite = { track -> toggleFavorite(track) },
                 onOpenHome = { page = PAGE_HOME },
+            )
+
+            PAGE_LIBRARY -> LibraryScreen(
+                state = state,
+                onBack = { page = PAGE_PLAYER },
+                onPlay = { item ->
+                    PlayerBus.post { it.playSavedUri(item) }
+                    page = PAGE_PLAYER
+                },
+                onApplyRingtone = { item -> PlayerBus.post { it.applySavedRingtone(item) } },
+                onDelete = { item -> PlayerBus.post { it.deleteSavedItem(item) } },
+                onOpenFolder = { item -> PlayerBus.post { it.openSavedFolder(item) } },
             )
 
             PAGE_DIAG -> DiagnosticsScreen(

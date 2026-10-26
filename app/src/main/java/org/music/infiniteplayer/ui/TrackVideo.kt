@@ -161,7 +161,7 @@ private fun createVideoPlayer(
     streamUrl: String,
     playing: Boolean,
 ): ExoPlayer {
-    val factory = DefaultMediaSourceFactory(RangeDataSource.Factory())
+    val factory = DefaultMediaSourceFactory(RangeDataSource.Factory(context))
     // 기본(2.5초)보다 조금 짧게 잡아 첫 화면이 빨리 뜨되,
     // 너무 짧으면 계속 끊기므로 1초 정도는 버퍼를 허용한다.
     val loadControl = DefaultLoadControl.Builder()

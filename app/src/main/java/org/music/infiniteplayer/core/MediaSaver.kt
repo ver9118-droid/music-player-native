@@ -22,7 +22,7 @@ import kotlin.coroutines.resume
  */
 object MediaSaver {
 
-    private const val MUSIC_DIR = "Music/무한 음악 플레이어"
+    const val MUSIC_DIR = "Music/무한 음악 플레이어"
 
     /**
      * 벨소리 파일이 놓이는 폴더.
@@ -36,7 +36,7 @@ object MediaSaver {
      * 그래서 이 앱은 파일을 **Ringtones 폴더에 직접** 넣는다. 플래그는 둘 다 켠다:
      * `IS_RINGTONE=1` (설정 벨소리 목록) + `IS_MUSIC=1` (음악 라이브러리 · 사운드 선택기 ＋ 목록).
      */
-    private const val RING_DIR = "Ringtones"
+    const val RING_DIR = "Ringtones"
 
     /**
      * 이전 버전이 벨소리를 넣어 둔 폴더 (Music).
@@ -253,10 +253,10 @@ object MediaSaver {
     }
 
     /** MediaStore 행을 만든 앱인지 (다른 앱/사용자 파일을 지우지 않기 위해 확인한다) */
-    private fun ownedByApp(resolver: android.content.ContentResolver, uri: Uri, pkg: String): Boolean {
+    fun ownedByApp(resolver: android.content.ContentResolver, uri: Uri, pkg: String): Boolean {
         return try {
-            // OWNER_PACKAGE_ID (API 29) — 컬럼 이름으로 조회한다 (상수 이름이 버전마다 다르다)
-            val column = "owner_package_id"
+            // 공개 컬럼 이름은 owner_package_name 이다 (MediaStore.MediaColumns.OWNER_PACKAGE_NAME, API 29+)
+            val column = "owner_package_name"
             resolver.query(uri, arrayOf(column), null, null, null)?.use { c ->
                 c.getColumnIndex(column) >= 0 && c.moveToFirst() && c.getString(0) == pkg
             } ?: false
@@ -266,7 +266,7 @@ object MediaSaver {
     }
 
     /** 앱이 만든 벨소리 파일명인지 (`곡명 (벨소리).ext`) — 사용자 파일은 건드리지 않는다 */
-    private fun isAppCreated(displayName: String): Boolean = displayName.contains("(벨소리)")
+    fun isAppCreated(displayName: String): Boolean = displayName.contains("(벨소리)")
 
     private fun insert(
         context: Context,

@@ -34,6 +34,36 @@ class MainActivity : ComponentActivity() {
      */
     private var mediaController: MediaController? = null
 
+    /** 세션이 끊겼을 때 자동 재연결 (차량/블루투스 AVRCP 제어 유지) */
+    private var reconnecting = false
+    private var connecting = false
+    private var released = false
+
+    private val controllerListener = object : MediaController.Listener {
+        override fun onDisconnected(controller: MediaController) {
+            mediaController = null
+            scheduleReconnect()
+        }
+
+        override fun onError(controller: MediaController, sessionError: androidx.media3.session.SessionError) {
+            org.music.infiniteplayer.core.CrashLog.saveText("MediaController: $sessionError")
+            mediaController = null
+            scheduleReconnect()
+        }
+    }
+
+    private fun scheduleReconnect() {
+        if (released || reconnecting || isFinishing || isDestroyed) return
+        reconnecting = true
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            reconnecting = false
+            if (!released && !isFinishing && !isDestroyed) {
+                ensureService()
+                connectMediaController()
+            }
+        }, 1200L)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -65,21 +95,29 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connectMediaController() {
+        if (released) return
+        if (connecting || mediaController != null) return
+        connecting = true
         try {
             val token = SessionToken(
                 this,
                 android.content.ComponentName(this, PlaybackService::class.java),
             )
-            val future = MediaController.Builder(this, token).buildAsync()
+            val future = MediaController.Builder(this, token)
+                .setListener(controllerListener)
+                .buildAsync()
             future.addListener({
+                connecting = false
                 try {
                     // 필드를 유지해야 컨트롤러 연결이 유지된다 (세션 활성 상태)
                     mediaController = future.get()
                 } catch (e: Exception) {
+                    mediaController = null
                     org.music.infiniteplayer.core.CrashLog.save(e)
                 }
             }, ContextCompat.getMainExecutor(this))
         } catch (e: Exception) {
+            connecting = false
             org.music.infiniteplayer.core.CrashLog.save(e)
         }
     }
@@ -89,6 +127,18 @@ class MainActivity : ComponentActivity() {
         // 서비스가 죽었었으면(최근 목록에서 제거 등) 다시 살린다.
         // 화면이 다시 앞으로 왔으므로 startService 가 허용된다.
         ensureService()
+        // 세션이 끊긴 채로 돌아온 경우(차량 재연결 등) 컨트롤러를 다시 붙인다.
+        if (mediaController == null && !released) connectMediaController()
+    }
+
+    override fun onDestroy() {
+        released = true
+        try {
+            mediaController?.release()
+        } catch (_: Exception) {
+        }
+        mediaController = null
+        super.onDestroy()
     }
 
     private fun ensureService() {

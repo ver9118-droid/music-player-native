@@ -357,9 +357,16 @@ class RangeDataSource : DataSource {
 
     override fun getResponseHeaders(): Map<String, List<String>> = responseHeaders
 
-    /** ExoPlayer 에서 쓰는 DataSource.Factory */
-    class Factory : DataSource.Factory {
-        override fun createDataSource(): DataSource = RangeDataSource()
+    /**
+     * ExoPlayer 에서 쓰는 DataSource.Factory.
+     *
+     * http/https 는 이 클래스가 처리하고(유튜브 403 회피용 닫힌 Range),
+     * file:// · content:// (기기에 저장한 곡) 는 [androidx.media3.datasource.DefaultDataSource]
+     * 가 처리하도록 넘긴다.
+     */
+    class Factory(private val context: android.content.Context) : DataSource.Factory {
+        override fun createDataSource(): DataSource =
+            androidx.media3.datasource.DefaultDataSource(context, RangeDataSource())
     }
 }
 

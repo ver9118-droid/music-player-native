@@ -54,8 +54,10 @@ data class PlayerState(
     val error: String = "",
     val callActive: Boolean = false,
     val downloadProgress: Int = -1,       // 로컬 다운로드 진행률 (-1 = 없음)
+    val downloadKind: String = "music",   // 뮤직다운 / 벨소리다운 (문구 통일용)
     val toast: String = "",               // 사용자에게 보여줄 메시지
     val toastId: Long = 0L,               // 같은 메시지도 반복 표시되도록 증가
+    val libraryTick: Int = 0,             // 저장 목록이 바뀜(삭제/벨소리 적용) → 화면 다시 읽기
 )
 
 /**

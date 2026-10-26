@@ -1,7 +1,7 @@
 # 무한 음악 플레이어 — 안드로이드 네이티브 버전
 
 > **다운로드**: [Releases 페이지](https://github.com/ver9118-droid/music-player-native/releases) 에서
-> `app-release-v3.5.30.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
+> `app-release-v3.5.31.apk` 를 받으세요. (설치: 파일 선택 → "알 수 없는 앱 설치 허용")
 
 데스크톱 `무한 음악 플레이어 v1.6.1` 의 모바일 버전입니다.
 이전 버전(Kivy + buildozer, APK 60MB, 파이썬 런타임)을 **완전 재작성** 했습니다.
@@ -9,7 +9,7 @@
 | 항목 | 이전 (Kivy) | 현재 (네이티브) |
 |---|---|---|
 | 앱 시작 | 파이썬+OpenGL 초기화로 1.5~3초 | AOT 네이티브, **0.3초 이내** |
-| APK 크기 | 약 60MB | 약 13MB (R8 축소 미적용) |
+| APK 크기 | 약 60MB | 약 9MB (R8 축소 미적용) |
 | 백그라운드 재생 | p4a arbitrary service | `MediaSessionService` (공식 방식) |
 | 차량 블루투스 | jnius 로 MediaSession 직접 조작 | `MediaSession` 기본 구현 (표준 호환) |
 | 전화 통화 처리 | 오디오 포커스만 | 오디오 포커스 + `TelephonyCallback` 직접 감지 |
@@ -53,6 +53,28 @@
 - **한국대중음악 장르 8종** (유튜브 검색)
 - 재생은 유튜브 InnerTube API 로 직접 스트림 URL 을 받아 ExoPlayer 가 재생
   (별도 다운로드/변환 불필요 → 준비 시간 1~2초)
+
+## v3.5.31 변경 내용
+- **뮤직다운 · 벨소리다운 문구 통일 + 저장 파일 관리 화면**
+  - 재생 화면의 칩 이름을 "뮤직다운" / "벨소리다운" 으로 바꾸고, 진행률과 결과 토스트도 같은 말로 표시한다.
+  - 칩 옆 "관리" 버튼 → 저장한 파일 목록(제목 · 아티스트 · 크기 · 폴더) 화면.
+    각 파일에서 **재생 / 벨소리 적용 / 삭제 / 폴더 열기** 를 바로 실행한다.
+  - 벨소리 폴더(Ringtones) 의 곡을 골라 기본 벨소리로 바로 적용할 수 있다.
+  - 삭제는 **이 앱이 만든 파일**(`owner_package_id`)만 — 사용자 파일은 건드리지 않는다.
+  - 저장한 곡은 유튜브 해석 없이 MediaStore URI 로 바로 재생된다
+    (DataSource 팩토리가 `content://` · `file://` 을 처리하도록 확장).
+- **차량 블루투스(AVRCP) 안정화**
+  - MediaSession 에 고정 ID 를 주고, 앱을 최근 목록에서 밀어내도
+    연결된 세션(차량/블루투스)이 있으면 서비스를 유지한다.
+  - UI 의 MediaController 가 끊기면 자동으로 다시 연결한다
+    (`onDisconnected` / `onError` → 1.2초 후 재연결).
+- **APK 크기 13MB → 9MB**
+  - `material-icons-extended`(약 8,500 클래스) 를 `material-icons-core` + 직접 그린 아이콘 12개로 교체.
+  - R8 은 계속 꺼둔다 (켜면 스트리밍이 깨져서 그대로 둔다).
+- **시작 속도**
+  - `CrashLog` 의 외부 저장소 경로 생성(느림)을 백그라운드로 이동.
+  - 시작 시 쓰지 않던 진단 로그 읽기를 제거.
+- versionName 3.5.31 / versionCode 92
 
 ## v3.5.30 변경 내용
 - **MediaCodec/MediaExtractor 를 백그라운드 스레드에서 실행**

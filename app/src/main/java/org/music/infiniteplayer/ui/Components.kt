@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -81,7 +80,7 @@ fun Artwork(
             )
         } else {
             Icon(
-                imageVector = Icons.Rounded.MusicNote,
+                imageVector = AppIcons.MusicNote,
                 contentDescription = null,
                 tint = TextSecondary.copy(alpha = 0.45f),
                 modifier = Modifier.size(size / 3),

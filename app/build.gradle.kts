@@ -15,8 +15,8 @@ android {
         applicationId = "org.music.infiniteplayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 91
-        versionName = "3.5.30"
+        versionCode = 92
+        versionName = "3.5.31"
         resourceConfigurations += setOf("ko", "en")
     }
 
@@ -99,7 +99,9 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    // icons-extended 는 R8 을 꺼두면 8,500 개 클래스(약 6~8MB) 가 그대로 APK 에 들어온다.
+    // core(98 개) + ui/Icons.kt 의 직접 그리는 아이콘으로 대체해서 APK 를 줄인다.
+    implementation("androidx.compose.material:material-icons-core")
 
     // ExoPlayer + MediaSession (차량 블루투스/알림/헤드폰 조작)
     implementation("androidx.media3:media3-exoplayer:1.5.1")

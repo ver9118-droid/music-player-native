@@ -35,16 +35,19 @@ object CrashLog {
             stackFile = File(dir, "main_stack.txt")
         } catch (_: Exception) {
         }
-        try {
-            // 사용자가 파일관리자로 볼 수 있는 위치에도 저장
-            val ext = context.getExternalFilesDir(null)
-            if (ext != null) {
-                ext.mkdirs()
-                externalFile = File(ext, "crash.txt")
-                externalStackFile = File(ext, "main_stack.txt")
+        // 사용자가 파일관리자로 볼 수 있는 위치에도 저장
+        // (외부 저장소 경로 확인/생성은 느리므로 앱 시작을 막지 않게 백그라운드에서)
+        Thread {
+            try {
+                val ext = context.getExternalFilesDir(null)
+                if (ext != null) {
+                    ext.mkdirs()
+                    externalFile = File(ext, "crash.txt")
+                    externalStackFile = File(ext, "main_stack.txt")
+                }
+            } catch (_: Exception) {
             }
-        } catch (_: Exception) {
-        }
+        }.start()
 
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         val mainThread = android.os.Looper.getMainLooper().thread
