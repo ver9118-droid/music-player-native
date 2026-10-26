@@ -2,13 +2,10 @@ package org.music.infiniteplayer.core
 
 import android.content.ContentUris
 import android.content.Context
-import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.MediaStore
-import java.io.File
 
 /**
  * 저장된 파일(뮤직다운 / 벨소리다운) 목록.
@@ -177,46 +174,6 @@ object LibraryIndex {
         } catch (_: Exception) {
             false
         }
-    }
-
-    /**
-     * 파일이 들어 있는 폴더를 연다.
-     *
-     *  - 문서 UI(파일 관리자) 로 열기 → 실패하면 파일 경로로 열기
-     *  - 둘 다 없으면 열지 못하므로 폴더 경로 문자열을 돌려준다 (토스트 안내용)
-     */
-    fun openFolder(context: Context, folder: String): String {
-        val rel = folder.ifBlank { MediaSaver.RING_DIR }
-
-        // 1) Documents UI
-        try {
-            val doc = Uri.parse(
-                "content://com.android.externalstorage.documents/document/primary%3A" + Uri.encode(rel)
-            )
-            val intent = Intent(Intent.ACTION_VIEW)
-                .setDataAndType(doc, "vnd.android.document/directory")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (intent.resolveActivity(context.packageManager) != null) {
-                context.startActivity(intent)
-                return ""
-            }
-        } catch (_: Exception) {
-        }
-
-        // 2) 파일 경로 (일부 파일 관리자)
-        try {
-            val dir = File(Environment.getExternalStorageDirectory(), rel)
-            val intent = Intent(Intent.ACTION_VIEW)
-                .setDataAndType(Uri.fromFile(dir), "resource/folder")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (intent.resolveActivity(context.packageManager) != null) {
-                context.startActivity(intent)
-                return ""
-            }
-        } catch (_: Exception) {
-        }
-
-        return rel
     }
 
     private fun Cursor.str(index: Int): String =

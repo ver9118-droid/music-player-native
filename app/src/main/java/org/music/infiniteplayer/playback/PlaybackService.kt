@@ -551,7 +551,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     // ── 재생 제어 내부 ─────────────────────────────────────────
-    private fun jumpTo(target: Int, autoPlay: Boolean) {
+    private fun jumpTo(target: Int, autoPlay: Boolean, startMs: Long = 0L) {
         val p = player ?: return
         val entry = entries.getOrNull(order.getOrNull(target) ?: -1) ?: return
         generation++
@@ -600,7 +600,7 @@ class PlaybackService : MediaSessionService() {
             windowStart = target
             // setMediaItems 가 리스너를 부르므로 그 전에 현재 곡을 확정해 둔다
             currentEntry = entry
-            p.setMediaItems(items, 0, 0L)
+            p.setMediaItems(items, 0, startMs.coerceAtLeast(0L))
             p.prepare()
             // 외부(블루투스/차량/알림)에서 반복 모드가 바뀌었을 수 있으므로 다시 적용
             applyPlayerRepeat()
@@ -1586,10 +1586,41 @@ class PlaybackService : MediaSessionService() {
 
     // ── 저장된 파일(라이브러리) 관리 ─────────────────────────────
     /**
+     * 저장함에서 재생하기 전의 재생목록.
+     * 저장함을 나가면 이 상태로 되돌아간다 (차트로 듣던 곡 유지).
+     */
+    private class SavedBackup(
+        val entries: List<Entry>,
+        val order: List<Int>,
+        val pos: Int,
+        val windowStart: Int,
+        val positionMs: Long,
+        val wasPlaying: Boolean,
+    )
+
+    private var savedBackup: SavedBackup? = null
+
+    /** 지금 재생 상태를 백업한다 (저장함 재생 직전). */
+    private fun backupQueue() {
+        savedBackup = SavedBackup(
+            entries = ArrayList(entries),
+            order = ArrayList(order),
+            pos = pos,
+            windowStart = windowStart,
+            positionMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L,
+            wasPlaying = player?.isPlaying == true,
+        )
+    }
+
+    /**
      * 기기에 저장된 파일을 바로 재생한다.
      * 유튜브 해석 없이 MediaStore URI 를 그대로 재생하므로 즉시 시작된다.
      */
     fun playSavedUri(item: org.music.infiniteplayer.core.LibraryIndex.SavedItem) {
+        // 저장함에 들어오기 전에 듣던 곡으로 돌아갈 수 있게 백업
+        // (이미 저장함 곡을 듣고 있었다면 처음 백업을 유지한다)
+        if (currentEntry?.savedUri == null) backupQueue()
+
         val track = Track(
             id = item.uri.toString(),
             title = item.title.ifBlank { item.name.substringBeforeLast('.') },
@@ -1605,6 +1636,25 @@ class PlaybackService : MediaSessionService() {
         order.add(0)
         windowStart = 0
         jumpTo(0, autoPlay = true)
+    }
+
+    /**
+     * 저장함에서 나갈 때 호출 — 저장함에서 재생하기 전의 재생목록으로 되돌린다.
+     * (곡·재생 위치·재생 여부까지 복원)
+     */
+    fun restoreSavedQueue() {
+        val backup = savedBackup ?: return
+        savedBackup = null
+        // 이미 다른(차트) 곡을 재생 중이면 되돌릴 필요 없음
+        if (currentEntry?.savedUri == null) return
+        if (backup.entries.isEmpty() || backup.order.isEmpty()) return
+
+        entries.clear()
+        entries.addAll(backup.entries)
+        order.clear()
+        order.addAll(backup.order)
+        windowStart = backup.windowStart
+        jumpTo(backup.pos, autoPlay = backup.wasPlaying, startMs = backup.positionMs)
     }
 
     /**
@@ -1654,12 +1704,6 @@ class PlaybackService : MediaSessionService() {
             if (ok) toast("삭제 완료 · ${item.name}")
             else toast("삭제 실패 · 파일이 이미 없거나 권한이 없습니다")
         }
-    }
-
-    /** 파일이 들어 있는 폴더를 연다. */
-    fun openSavedFolder(item: org.music.infiniteplayer.core.LibraryIndex.SavedItem) {
-        val fallback = org.music.infiniteplayer.core.LibraryIndex.openFolder(this, item.folder)
-        if (fallback.isNotBlank()) toast("폴더: $fallback")
     }
 
     /** 파일명 (확장자는 실제 포맷에 맞춘다) */

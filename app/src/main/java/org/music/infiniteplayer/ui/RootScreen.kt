@@ -102,7 +102,11 @@ fun RootScreen() {
         }
     }
 
-    BackHandler(enabled = page != PAGE_HOME) { page = PAGE_HOME }
+    BackHandler(enabled = page != PAGE_HOME) {
+        // 저장함에서 나가면(시스템 뒤로가기) 원래 듣던 곡으로 돌아간다
+        if (page == PAGE_LIBRARY) PlayerBus.post { it.restoreSavedQueue() }
+        page = PAGE_HOME
+    }
 
     // 서비스에서 온 알림(다운로드/벨소리 결과)을 토스트로 표시
     val toastContext = LocalContext.current
@@ -238,11 +242,14 @@ fun RootScreen() {
 
             PAGE_LIBRARY -> LibraryScreen(
                 state = state,
-                onBack = { page = PAGE_PLAYER },
+                onBack = {
+                    // 저장함에서 나가면 원래 듣던 곡으로 돌아간다
+                    PlayerBus.post { it.restoreSavedQueue() }
+                    page = PAGE_PLAYER
+                },
                 onPlay = { item -> PlayerBus.post { it.toggleSavedItem(item) } },
                 onApplyRingtone = { item -> PlayerBus.post { it.applySavedRingtone(item) } },
                 onDelete = { item -> PlayerBus.post { it.deleteSavedItem(item) } },
-                onOpenFolder = { item -> PlayerBus.post { it.openSavedFolder(item) } },
             )
 
             PAGE_DIAG -> DiagnosticsScreen(

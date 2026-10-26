@@ -594,7 +594,7 @@ fun FavoritesScreen(
  * 저장한 파일 관리 화면 (뮤직다운 / 벨소리다운).
  *
  * 파일 목록에서 바로 재생하거나 기본 벨소리로 적용하고,
- * 앱이 만든 파일은 삭제할 수 있다. "폴더 열기" 로 파일 관리자에서 위치를 확인한다.
+ * 앱이 만든 파일은 삭제할 수 있다.
  */
 @Composable
 fun LibraryScreen(
@@ -603,7 +603,6 @@ fun LibraryScreen(
     onPlay: (LibraryIndex.SavedItem) -> Unit,
     onApplyRingtone: (LibraryIndex.SavedItem) -> Unit,
     onDelete: (LibraryIndex.SavedItem) -> Unit,
-    onOpenFolder: (LibraryIndex.SavedItem) -> Unit,
 ) {
     val context = LocalContext.current
     var items by remember { mutableStateOf<List<LibraryIndex.SavedItem>>(emptyList()) }
@@ -716,7 +715,6 @@ fun LibraryScreen(
                             onPlay = { onPlay(item) },
                             onApplyRingtone = { onApplyRingtone(item) },
                             onDelete = { confirm = item },
-                            onOpenFolder = { onOpenFolder(item) },
                         )
                     }
                 }
@@ -768,7 +766,6 @@ private fun LibraryRow(
     onPlay: () -> Unit,
     onApplyRingtone: () -> Unit,
     onDelete: () -> Unit,
-    onOpenFolder: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -827,7 +824,6 @@ private fun LibraryRow(
             if (item.appOwned) {
                 SmallChip("삭제", false, Icons.Rounded.Delete) { onDelete() }
             }
-            SmallChip("폴더 열기", false, AppIcons.FolderOpen) { onOpenFolder() }
         }
     }
 }
