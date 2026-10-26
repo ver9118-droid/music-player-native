@@ -1,5 +1,7 @@
 package org.music.infiniteplayer.ui
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathBuilder
 import androidx.compose.ui.graphics.vector.PathNode
@@ -87,7 +89,10 @@ private fun rounded(name: String, data: String): ImageVector =
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f,
-    ).path { applyPathData(data) }.build()
+    )
+        // fill 을 지정하지 않으면 아무것도 그려지지 않는다 (기본값 null)
+        .path(fill = SolidColor(Color.Black)) { applyPathData(data) }
+        .build()
 
 /**
  * Material Symbols svg(0 -960 960 960 viewBox) 를 24x24 로 축약한다.
@@ -100,7 +105,9 @@ private fun symbol(name: String, data: String): ImageVector =
         defaultHeight = 24.dp,
         viewportWidth = 24f,
         viewportHeight = 24f,
-    ).path { applyPathData(data, 1f / 40f, 24f) }.build()
+    )
+        .path(fill = SolidColor(Color.Black)) { applyPathData(data, 1f / 40f, 24f) }
+        .build()
 
 /** svg path data 를 PathBuilder DSL 로 옮겨 담는다(extendRule = NonZero, svg fill-rule 없음). */
 private fun PathBuilder.applyPathData(data: String, k: Float = 1f, oy: Float = 0f) {

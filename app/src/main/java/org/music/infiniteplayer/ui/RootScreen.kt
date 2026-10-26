@@ -239,10 +239,7 @@ fun RootScreen() {
             PAGE_LIBRARY -> LibraryScreen(
                 state = state,
                 onBack = { page = PAGE_PLAYER },
-                onPlay = { item ->
-                    PlayerBus.post { it.playSavedUri(item) }
-                    page = PAGE_PLAYER
-                },
+                onPlay = { item -> PlayerBus.post { it.toggleSavedItem(item) } },
                 onApplyRingtone = { item -> PlayerBus.post { it.applySavedRingtone(item) } },
                 onDelete = { item -> PlayerBus.post { it.deleteSavedItem(item) } },
                 onOpenFolder = { item -> PlayerBus.post { it.openSavedFolder(item) } },

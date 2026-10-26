@@ -81,6 +81,8 @@ object LibraryIndex {
         }
 
         val out = ArrayList<SavedItem>()
+        // 다운로드 때 기록해 둔 제목/아티스트 (태그 없는 m4a 보완)
+        val savedMeta = SavedMeta.load(context)
         try {
             val cursor = resolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -103,9 +105,27 @@ object LibraryIndex {
                 while (c.moveToNext() && out.size < MAX_ROWS) {
                     val id = c.getLong(idIdx)
                     val name = c.str(nameIdx)
-                    val displayTitle = c.str(titleIdx).ifBlank { name.substringBeforeLast('.') }
-                    val artist = c.str(artistIdx)
                     val ringtone = c.num(ringIdx) == 1L
+                    val rawTitle = c.str(titleIdx)
+                    val meta = savedMeta[name]
+
+                    // 제목 : 다운로드 때 기록한 값 → MediaStore 태그 → 파일명
+                    var displayTitle = (meta?.first ?: "").ifBlank {
+                        if (rawTitle.isBlank() || rawTitle.equals("<unknown>", ignoreCase = true)) {
+                            name.substringBeforeLast('.')
+                        } else {
+                            rawTitle
+                        }
+                    }
+                    if (ringtone) displayTitle = displayTitle.removeSuffix(" (벨소리)")
+
+                    // 아티스트 : 다운로드 때 기록한 값 → 태그 → 파일명("아티스트 - 곡명")
+                    // (유튜브에서 받은 m4a 는 태그가 없어 MediaStore 가 "<unknown>" 을 준다)
+                    val taggedArtist = c.str(artistIdx)
+                        .let { if (it.equals("<unknown>", ignoreCase = true)) "" else it }
+                    val artist = (meta?.second ?: "").ifBlank { taggedArtist }
+                        .ifBlank { artistFromName(name) }
+
                     val size = c.num(sizeIdx)
                     val added = c.num(addedIdx)
                     val folder = c.str(folderIdx).trimEnd('/')
@@ -204,4 +224,14 @@ object LibraryIndex {
 
     private fun Cursor.num(index: Int): Long =
         if (index >= 0 && !isNull(index)) getLong(index) else 0L
+
+    /**
+     * 파일명에서 아티스트를 추측한다.
+     * 뮤직다운 파일은 `아티스트 - 곡명.ext` 형식으로 저장되므로 앞부분을 쓴다.
+     */
+    private fun artistFromName(name: String): String {
+        val base = name.substringBeforeLast('.').removeSuffix(" (벨소리)")
+        val dash = base.indexOf(" - ")
+        return if (dash > 0) base.substring(0, dash).trim() else ""
+    }
 }

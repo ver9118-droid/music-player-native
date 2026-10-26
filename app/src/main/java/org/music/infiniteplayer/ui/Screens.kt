@@ -697,7 +697,7 @@ fun LibraryScreen(
 
             else -> {
                 Text(
-                    "파일을 누르지 않아도 아래 버튼으로 바로 실행할 수 있어요",
+                    "재생을 한 번 더 누르면 일시정지됩니다",
                     color = TextSecondary,
                     fontSize = 11.5.sp,
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp),
@@ -818,7 +818,11 @@ private fun LibraryRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SmallChip("재생", playing, Icons.Rounded.PlayArrow) { onPlay() }
+            SmallChip(
+                if (playing) "일시정지" else "재생",
+                playing,
+                if (playing) AppIcons.Pause else Icons.Rounded.PlayArrow,
+            ) { onPlay() }
             SmallChip("벨소리 적용", false, Icons.Rounded.Notifications) { onApplyRingtone() }
             if (item.appOwned) {
                 SmallChip("삭제", false, Icons.Rounded.Delete) { onDelete() }
@@ -828,15 +832,16 @@ private fun LibraryRow(
     }
 }
 
-/** 크기 · 아티스트 · 폴더 한 줄 요약 */
+/** 크기 · 아티스트 · 폴더 한 줄 요약 (아티스트 태그가 없으면 생략) */
 private fun librarySubtitle(item: LibraryIndex.SavedItem): String {
     val size = when {
         item.size >= 1024L * 1024L -> "%.1f MB".format(item.size / (1024f * 1024f))
         item.size >= 1024L -> "%d KB".format(item.size / 1024L)
         else -> "${item.size} B"
     }
-    val who = item.artist.ifBlank { "기기 저장" }
-    return "$who · $size · ${item.folder.ifBlank { "기본 폴더" }}"
+    return listOf(item.artist, size, item.folder.ifBlank { "기본 폴더" })
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
 }
 
 /** 통합 검색 입력창 */

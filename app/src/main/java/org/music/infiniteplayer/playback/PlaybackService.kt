@@ -1398,6 +1398,10 @@ class PlaybackService : MediaSessionService() {
                 return@launch
             }
             errorText = ""
+            // 저장 파일 목록에서 아티스트를 보여 주기 위해 기록해 둔다 (m4a 에는 태그가 없다)
+            org.music.infiniteplayer.core.SavedMeta.put(
+                this@PlaybackService, name, entry.track.title, entry.track.artist,
+            )
             setManualStatus("${kindWord()} 완료")
             toast("${kindWord()} 완료 · $name")
             publish()
@@ -1546,6 +1550,9 @@ class PlaybackService : MediaSessionService() {
             // → 같은 곡인지 는 URI/파일 경로 + 파일명 두 가지로 비교한다
             //   (이전 버전이 만들어 둔 음악 폴더 사본과 루트 Ringtones 는 URI 가 달라서
             //    파일명으로 한 번 더 비교해야 같은 곡을 다시 설정하지 않는다)
+            org.music.infiniteplayer.core.SavedMeta.put(
+                this@PlaybackService, name, entry.track.title, entry.track.artist,
+            )
             val setter = org.music.infiniteplayer.core.RingtoneSetter
             val alreadySet = setter.isSameRingtone(
                 this@PlaybackService, setter.currentRingtoneUri(this@PlaybackService), saved.uri,
@@ -1598,6 +1605,19 @@ class PlaybackService : MediaSessionService() {
         order.add(0)
         windowStart = 0
         jumpTo(0, autoPlay = true)
+    }
+
+    /**
+     * 관리 화면의 재생 버튼.
+     *  - 같은 곡이면 재생/일시정지 토글
+     *  - 다른 곡이면 그 곡을 새로 재생
+     */
+    fun toggleSavedItem(item: org.music.infiniteplayer.core.LibraryIndex.SavedItem) {
+        if (currentEntry?.savedUri == item.uri) {
+            toggle()
+            return
+        }
+        playSavedUri(item)
     }
 
     /** 저장된 파일(벨소리 폴더의 곡 포함)을 기본 벨소리로 적용한다. */
