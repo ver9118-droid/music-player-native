@@ -1,10 +1,10 @@
-ï»¿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// CI ì—ì„œ keystore ë¥¼ ë‚´ë ¤ë°›ì•„ ì„œëª…í•œë‹¤. íŒŒì¼ì´ ì—†ìœ¼ë©´ debug í‚¤ë¡œ ë¹Œë“œí•œë‹¤(ë¹Œë“œ ì‹¤íŒ¨ ë°©ì§€).
+// CI ¿¡¼­ keystore ¸¦ ³»·Á¹Ş¾Æ ¼­¸íÇÑ´Ù. ÆÄÀÏÀÌ ¾øÀ¸¸é debug Å°·Î ºôµåÇÑ´Ù(ºôµå ½ÇÆĞ ¹æÁö).
 val releaseKeystore = rootProject.file("keystore/release.jks")
 
 android {
@@ -15,8 +15,8 @@ android {
         applicationId = "org.music.infiniteplayer"
         minSdk = 24
         targetSdk = 35
-        versionCode = 100
-        versionName = "3.5.40"
+        versionCode = 101
+        versionName = "3.5.41"
         resourceConfigurations += setOf("ko", "en")
     }
 
@@ -38,9 +38,9 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
-            // v2.9.7~2.9.8 ì—ì„œ R8 ì¶•ì†Œë¥¼ ì¼°ë”ë‹ˆ ìŠ¤íŠ¸ë¦¬ë° í•´ì„ì´ ì‹¤íŒ¨í–ˆë‹¤
-            // ("ëª¨ë“  ê³¡ì„ ì°¾ì„ ìˆ˜ ì—†ìŠµë‹ˆë‹¤") â†’ ê¸°ëŠ¥ ìš°ì„ ìœ¼ë¡œ ë‹¤ì‹œ ëˆë‹¤.
-            // (í¬ê¸° ìµœì í™”ëŠ” ë³„ë„ ê²€ì¦ í›„ ì¬ì‹œë„)
+            // v2.9.7~2.9.8 ¿¡¼­ R8 Ãà¼Ò¸¦ Ä×´õ´Ï ½ºÆ®¸®¹Ö ÇØ¼®ÀÌ ½ÇÆĞÇß´Ù
+            // ("¸ğµç °îÀ» Ã£À» ¼ö ¾ø½À´Ï´Ù") ¡æ ±â´É ¿ì¼±À¸·Î ´Ù½Ã ²ö´Ù.
+            // (Å©±â ÃÖÀûÈ­´Â º°µµ °ËÁõ ÈÄ Àç½Ãµµ)
             isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(
@@ -99,17 +99,17 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
-    // icons-extended ëŠ” R8 ì„ êº¼ë‘ë©´ 8,500 ê°œ í´ë˜ìŠ¤(ì•½ 6~8MB) ê°€ ê·¸ëŒ€ë¡œ APK ì— ë“¤ì–´ì˜¨ë‹¤.
-    // core(98 ê°œ) + ui/Icons.kt ì˜ ì§ì ‘ ê·¸ë¦¬ëŠ” ì•„ì´ì½˜ìœ¼ë¡œ ëŒ€ì²´í•´ì„œ APK ë¥¼ ì¤„ì¸ë‹¤.
+    // icons-extended ´Â R8 À» ²¨µÎ¸é 8,500 °³ Å¬·¡½º(¾à 6~8MB) °¡ ±×´ë·Î APK ¿¡ µé¾î¿Â´Ù.
+    // core(98 °³) + ui/Icons.kt ÀÇ Á÷Á¢ ±×¸®´Â ¾ÆÀÌÄÜÀ¸·Î ´ëÃ¼ÇØ¼­ APK ¸¦ ÁÙÀÎ´Ù.
     implementation("androidx.compose.material:material-icons-core")
 
-    // ExoPlayer + MediaSession (ì°¨ëŸ‰ ë¸”ë£¨íˆ¬ìŠ¤/ì•Œë¦¼/í—¤ë“œí° ì¡°ì‘)
+    // ExoPlayer + MediaSession (Â÷·® ºí·çÅõ½º/¾Ë¸²/ÇìµåÆù Á¶ÀÛ)
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")
     implementation("androidx.media3:media3-datasource:1.5.1")
-    // ì§€ê¸ˆ ì¬ìƒ í™”ë©´ì˜ ë®¤ì§ë¹„ë””ì˜¤ í‘œì‹œ (PlayerView)
+    // Áö±İ Àç»ı È­¸éÀÇ ¹ÂÁ÷ºñµğ¿À Ç¥½Ã (PlayerView)
     implementation("androidx.media3:media3-ui:1.5.1")
-    // LoudnessEnhancerëŠ” Android í”„ë ˆì„ì›Œí¬ì— ë‚´ì¥ë˜ì–´ ìˆìœ¼ë¯€ë¡œ ë³„ë„ ì˜ì¡´ì„± ë¶ˆí•„ìš”
+    // LoudnessEnhancer´Â Android ÇÁ·¹ÀÓ¿öÅ©¿¡ ³»ÀåµÇ¾î ÀÖÀ¸¹Ç·Î º°µµ ÀÇÁ¸¼º ºÒÇÊ¿ä
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

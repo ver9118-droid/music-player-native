@@ -468,14 +468,22 @@ class YoutubeRepository(var quality: String = "high") {
             else if (bigrams(nt, nc) >= 2) s += 2
         }
         val na = Text.norm(targetArtist)
-        val naCand = nc // 제목 안에서 가수명 찾기
-        if (na.isNotEmpty() && naCand.contains(na)) s += 2
+        val candTitleNorm = nc
+        val candArtistNorm = Text.norm(cand.artist)
+        if (na.isNotEmpty()) {
+            // 후보 채널/아티스트명에 원곡 가수가 포함되면 강한 신호
+            if (candArtistNorm.contains(na)) s += 3
+            else if (candTitleNorm.contains(na)) s += 2
+        }
         // 괄호 제거한 가수명도 매칭 시도 (예: "아일릿(ILLIT)" -> "아일릿")
         val naSimple = Text.norm(targetArtist.replace(Regex("\\([^)]*\\)"), ""))
-        if (naSimple.isNotEmpty() && naSimple != na && naCand.contains(naSimple)) s += 1
+        if (naSimple.isNotEmpty() && naSimple != na) {
+            if (candArtistNorm.contains(naSimple)) s += 2
+            else if (candTitleNorm.contains(naSimple)) s += 1
+        }
 
-        val low = cand.title.lowercase()
-        for (w in BAD_WORDS) if (low.contains(w)) s -= 3
+        val low = (cand.title + " " + cand.artist).lowercase()
+        for (w in BAD_WORDS) if (low.contains(w)) s -= 4
         for (w in GOOD_WORDS) if (low.contains(w)) s += 1
         return s
     }
@@ -573,6 +581,11 @@ class YoutubeRepository(var quality: String = "high") {
             "모음", "playlist", "플레이리스트", "연속재생", "메들리", "medley",
             "nonstop", "논스톱", "2시간", "3시간", "10시간", "greatest hits",
             "full album", "compilation", "인기차트", "선곡",
+            // AI/장르 변환·편곡 버전은 원곡 재생에 부적합하므로 제외
+            "트로트", "7080", "남자버전", "여자버전", "남자 버전", "여자 버전",
+            "male version", "female version", "boy version", "girl version",
+            "ai ver", "ai버전", "ai 버전", "트로트ver", "트로트 ver",
+            "slowed", "sped up", "reverb", "8d audio",
         )
         val GOOD_WORDS = listOf("official", "mv", "m/v", "audio", "키WI", "정오fficial")
 
