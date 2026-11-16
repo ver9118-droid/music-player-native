@@ -36,12 +36,27 @@ class ChartRepository(private val youtube: YoutubeRepository) {
     // ── 멜론 차트 ──────────────────────────────────────────────
     private fun parseMelon(html: String): List<Track> {
         val tracks = ArrayList<Track>(60)
+
+        // 멜론은 페이지별로 행 클래스가 다르다.
+        //  - TOP100  : <tr class="lst50" ...>  (1~50 위는 lst50, 51~100 위는 lst100)
+        //  - 장르 차트: <tr>  (클래스 없음)
+        // 클래스 유무에 따라 필터 방식을 바꿔 두 페이지 모두의 순위곡을 빠짐없이 파싱한다.
+        // (클래스가 있는 페이지에서만 lst 필터를 적용해, 다른 차트 영역이 섞이는 것을 막는다.)
+        val hasLstRows = TR_RE.findAll(html).any {
+            val a = it.groupValues[1]
+            a.contains("lst50") || a.contains("lst100")
+        }
+
         TR_RE.findAll(html).forEach { m ->
             val attrs = m.groupValues[1]
             val body = m.groupValues[2]
-            // TOP100 테이블의 행만 선택 (다른 차트 영역 제외)
-            if (!attrs.contains("lst50") && !attrs.contains("lst100")) return@forEach
-            if (!body.contains("ellipsis")) return@forEach
+
+            // 실제 차트 행 판별 : 곡 번호(data-song-no)와 곡정보 블록(ellipsis)이 있어야 한다.
+            val songNo = SONG_NO_RE.find(attrs + body)?.groupValues?.get(1).orEmpty()
+            if (songNo.isEmpty()) return@forEach
+            if (!body.contains("ellipsis rank01") && !body.contains("ellipsis rank03")) return@forEach
+            // TOP100 처럼 lst 클래스가 있는 페이지는 해당 행만 선택 (다른 차트 영역 제외)
+            if (hasLstRows && !attrs.contains("lst50") && !attrs.contains("lst100")) return@forEach
 
             val blocks = LinkedHashMap<String, String>()
             BLOCK_RE.findAll(body).forEach { b ->
@@ -58,7 +73,6 @@ class ChartRepository(private val youtube: YoutubeRepository) {
             }
             if (title.isEmpty()) return@forEach
 
-            val songNo = SONG_NO_RE.find(attrs + body)?.groupValues?.get(1).orEmpty()
             val rank = RANK_RE.find(body)?.groupValues?.get(1)?.toIntOrNull() ?: (tracks.size + 1)
             val thumb = THUMB_RE.find(body)?.groupValues?.get(1).orEmpty()
 
