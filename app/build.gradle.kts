@@ -109,6 +109,7 @@ dependencies {
     implementation("androidx.media3:media3-datasource:1.5.1")
     // 지금 재생 화면의 뮤직비디오 표시 (PlayerView)
     implementation("androidx.media3:media3-ui:1.5.1")
+    // LoudnessEnhancer는 Android 프레임워크에 내장되어 있으므로 별도 의존성 불필요
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

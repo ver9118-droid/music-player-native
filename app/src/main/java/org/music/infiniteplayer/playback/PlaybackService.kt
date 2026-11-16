@@ -2,6 +2,7 @@
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
@@ -127,6 +128,9 @@ class PlaybackService : MediaSessionService() {
     private var shuffleOn = false
     private var volume = 0.85f
 
+    /** 볼륨 정규화용 LoudnessEnhancer */
+    private var loudnessEnhancer: LoudnessEnhancer? = null
+
     // ── 생애주기 ───────────────────────────────────────────────
     override fun onCreate() {
         super.onCreate()
@@ -215,6 +219,8 @@ class PlaybackService : MediaSessionService() {
         mediaSession = null
         player?.release()
         player = null
+        loudnessEnhancer?.release()
+        loudnessEnhancer = null
         super.onDestroy()
     }
 
@@ -1312,6 +1318,22 @@ class PlaybackService : MediaSessionService() {
             errorText = "재생 오류 ($desc)"
             publish()
             recoverFromError(desc)
+        }
+
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            if (audioSessionId != 0) {
+                // 새 오디오 세션 → 효과 적용
+                loudnessEnhancer?.release()
+                loudnessEnhancer = LoudnessEnhancer(audioSessionId).apply {
+                    setTargetGain(2000) // 20 dB 목표 이득
+                    enabled = true
+                }
+            } else {
+                // 오디오 세션 해제 중이므로 효과 제거
+                loudnessEnhancer?.enabled = false
+                loudnessEnhancer?.release()
+                loudnessEnhancer = null
+            }
         }
     }
 
