@@ -16,7 +16,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 96
-        versionName = "3.5.35"
+        versionName = "3.5.36"
         resourceConfigurations += setOf("ko", "en")
     }
 
