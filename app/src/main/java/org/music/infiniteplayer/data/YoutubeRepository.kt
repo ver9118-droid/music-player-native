@@ -102,9 +102,19 @@ class YoutubeRepository(var quality: String = "high") {
 
     /** 검색 결과 중 점수 높은 순으로 상위 후보 (최대 4개) */
     private suspend fun searchCandidates(track: Track): List<Track> {
-        val results = search(buildQuery(track), 12)
-        if (results.isEmpty()) return emptyList()
-        val scored = results.map { it to score(track.title, track.artist, it) }
+        val queries = linkedSetOf(buildQuery(track))
+        // 첫 검색이 부정확할 수 있어, 괄호 제거된 가수명+제목으로도 한 번 더 찾는다
+        val artistSimple = track.artist.replace(Regex("\\([^)]*\\)"), "").trim()
+        if (artistSimple.isNotEmpty() && artistSimple != track.artist.trim()) {
+            queries.add("$artistSimple ${track.title}".trim())
+        }
+        val merged = LinkedHashMap<String, Track>()
+        for (q in queries) {
+            for (r in search(q, 12)) merged.putIfAbsent(r.videoId, r)
+            if (merged.size >= 12) break
+        }
+        if (merged.isEmpty()) return emptyList()
+        val scored = merged.values.map { it to score(track.title, track.artist, it) }
             .sortedByDescending { it.second }
         val best = scored.first().second
         // 점수가 너무 낮으면(다른 곡) 후보를 넓히지 않는다
@@ -421,11 +431,16 @@ class YoutubeRepository(var quality: String = "high") {
 
     // ── 검색어 매칭 ───────────────────────────────────────────
     private fun buildQuery(track: Track): String {
-        val artist = track.artist.trim()
         val title = track.title.trim()
+        // 괄호 안 부가 설명(피처링 표기 변형 등)은 검색에 방해될 수 있어 제거한 형태도 준비한다
+        val artistRaw = track.artist.trim()
+        val artist = artistRaw.replace(Regex("\\([^)]*\\)"), "").trim().ifEmpty { artistRaw }
         val base = if (artist.isEmpty()) title else "$artist $title"
-        // 멜론 최신 뮤직비디오는 "뮤직비디오" 를 붙여야 공식 MV 가 먼저 나온다
-        return if (track.source == "melonmv") "$base 뮤직비디오" else base
+        return when (track.source) {
+            "melonmv" -> "$base 뮤직비디오"
+            "melon" -> "$base official audio"
+            else -> base
+        }
     }
 
     private fun pickBest(results: List<Track>, target: Track): Track? {
@@ -453,7 +468,11 @@ class YoutubeRepository(var quality: String = "high") {
             else if (bigrams(nt, nc) >= 2) s += 2
         }
         val na = Text.norm(targetArtist)
-        if (na.isNotEmpty() && nc.contains(na)) s += 2
+        val naCand = nc // 제목 안에서 가수명 찾기
+        if (na.isNotEmpty() && naCand.contains(na)) s += 2
+        // 괄호 제거한 가수명도 매칭 시도 (예: "아일릿(ILLIT)" -> "아일릿")
+        val naSimple = Text.norm(targetArtist.replace(Regex("\\([^)]*\\)"), ""))
+        if (naSimple.isNotEmpty() && naSimple != na && naCand.contains(naSimple)) s += 1
 
         val low = cand.title.lowercase()
         for (w in BAD_WORDS) if (low.contains(w)) s -= 3

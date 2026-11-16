@@ -844,6 +844,7 @@ class PlaybackService : MediaSessionService() {
             artist = track?.artist ?: "",
             album = track?.album ?: "",
             thumbUrl = track?.thumbUrl ?: "",
+            playingVideoId = entry?.audio?.videoId ?: "",
             shuffle = shuffleOn,
             repeat = repeatMode,
             infinite = infinite,

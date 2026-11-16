@@ -224,6 +224,7 @@ fun TrackVideo(
     track: Track,
     playing: Boolean,
     positionMs: Long,
+    preferredVideoId: String = "",
     modifier: Modifier = Modifier,
     fallback: @Composable () -> Unit,
 ) {
@@ -231,21 +232,29 @@ fun TrackVideo(
     val view = LocalView.current
 
     val quality = remember(track.id) { Prefs.quality }
+    val preferredKey = if (preferredVideoId.isNotBlank()) "${track.id}@$quality@vid=$preferredVideoId" else null
+    val cacheKey = preferredKey ?: videoKey(track, quality)
     // 미리 받아 둔 주소가 있으면 첫 프레임부터 바로 영상을 띄운다
-    var url by remember(track.id) { mutableStateOf(videoCache[videoKey(track, quality)]) }
-    var failed by remember(track.id) { mutableStateOf(false) }
+    var url by remember(cacheKey) { mutableStateOf(videoCache[cacheKey]) }
+    var failed by remember(cacheKey) { mutableStateOf(false) }
 
     // 노래 위치는 계속 바뀌므로 최신 값을 콜백에서 읽는다
     val latestPosition by rememberUpdatedState(positionMs)
 
-    // 영상 주소 찾기 (곡당 한 번)
-    LaunchedEffect(track.id) {
+    // 영상 주소 찾기 (곡당 한 번). preferredVideoId 가 오면 재생 중인 오디오와 같은 영상을 우선 사용한다.
+    LaunchedEffect(cacheKey) {
         failed = false
-        val key = videoKey(track, quality)
         if (url == null) {
             val found = try {
                 withTimeoutOrNull(15_000L) {
-                    YoutubeRepository(quality).resolveVideoStream(track)
+                    val repo = YoutubeRepository(quality)
+                    if (preferredVideoId.isNotBlank()) {
+                        // 현재 재생 중인 오디오와 동일한 YouTube 영상 ID 우선
+                        repo.resolveVideoStream(track.copy(videoId = preferredVideoId))
+                            ?: repo.resolveVideoStream(track)
+                    } else {
+                        repo.resolveVideoStream(track)
+                    }
                 }
             } catch (_: Exception) {
                 null
@@ -253,7 +262,9 @@ fun TrackVideo(
             if (found == null) {
                 failed = true
             } else {
-                rememberVideo(key, found.url)
+                rememberVideo(cacheKey, found.url)
+                // 일반 키로도 캐시해 다음 진입 시 바로 사용
+                if (preferredVideoId.isNotBlank()) rememberVideo(videoKey(track, quality), found.url)
                 url = found.url
             }
         }

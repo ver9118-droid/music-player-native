@@ -45,6 +45,8 @@ data class PlayerState(
     val artist: String = "",
     val album: String = "",
     val thumbUrl: String = "",
+    // 현재 재생에 사용 중인 유튜브 영상 ID (오디오/영상 동기화용)
+    val playingVideoId: String = "",
     val shuffle: Boolean = false,
     val repeat: String = "all",
     val infinite: Boolean = true,

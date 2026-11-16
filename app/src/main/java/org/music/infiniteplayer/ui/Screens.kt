@@ -1144,6 +1144,7 @@ fun NowPlayingScreen(
                 thumbUrl = state.thumbUrl,
                 playing = state.playing,
                 positionMs = tick.positionMs,
+                preferredVideoId = state.playingVideoId,
                 artworkSize = if (isLandscape) minOf(screenWidth, screenHeight) else 268.dp,
                 fillBox = true,
                 rounded = !isLandscape,
@@ -1327,6 +1328,7 @@ private fun PlayerMedia(
     thumbUrl: String,
     playing: Boolean,
     positionMs: Long,
+    preferredVideoId: String = "",
     artworkSize: Dp,
     modifier: Modifier = Modifier,
     rounded: Boolean = true,
@@ -1361,6 +1363,7 @@ private fun PlayerMedia(
                 track = track,
                 playing = playing,
                 positionMs = positionMs,
+                preferredVideoId = preferredVideoId,
                 modifier = Modifier.fillMaxSize(),
                 fallback = {
                     Artwork(
