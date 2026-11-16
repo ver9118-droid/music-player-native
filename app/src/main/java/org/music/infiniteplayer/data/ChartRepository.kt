@@ -39,6 +39,8 @@ class ChartRepository(private val youtube: YoutubeRepository) {
         TR_RE.findAll(html).forEach { m ->
             val attrs = m.groupValues[1]
             val body = m.groupValues[2]
+            // TOP100 테이블의 행만 선택 (다른 차트 영역 제외)
+            if (!attrs.contains("lst50") && !attrs.contains("lst100")) return@forEach
             if (!body.contains("ellipsis")) return@forEach
 
             val blocks = LinkedHashMap<String, String>()
